@@ -14,6 +14,8 @@ import { CuentasEnMemoria, SesionesEnMemoria } from "./infrastructure/cuentas.js
 import { InMemoryMenuCatalog, InMemorySessionRepository, systemClock, uuidGenerator } from "./infrastructure/in-memory.js";
 import { RecomendadorHeuristico, RecomendadorQvac } from "./infrastructure/recomendador-qvac.js";
 import { InMemoryWalletLedger } from "./infrastructure/wallet-ledger.js";
+import { WdkWalletLedger } from "./infrastructure/wallet-wdk.js";
+import { restaurantePorDefecto } from "./domain/restaurante.js";
 import { LedgerConLog } from "./infrastructure/wallet-log.js";
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +41,20 @@ const QVAC_MODELO = process.env["QVAC_MODEL"] ?? "qvac-local";
 // Este archivo es el único lugar donde se elige qué adaptador concreto entra.
 // Cambiar `InMemoryWalletLedger` por `WdkWalletLedger` es cambiar esta línea.
 
-const ledgerBase = new InMemoryWalletLedger(systemClock, uuidGenerator);
+// WDK_MODE=simulado vuelve al libro en memoria. Por defecto va WDK de verdad:
+// semilla BIP-39, derivación BIP-44 y motor de políticas.
+const usaWdk = (process.env["WDK_MODE"] ?? "wdk") !== "simulado";
+const ledgerBase = usaWdk
+  ? new WdkWalletLedger({
+      ...(process.env["WDK_SEED"] ? { seed: process.env["WDK_SEED"] } : {}),
+      chain: RED,
+      ...(process.env["EVM_RPC_URL"] ? { rpcUrl: process.env["EVM_RPC_URL"] } : {}),
+      tokenAddress: process.env["WDK_TOKEN_ADDRESS"] ?? "0x0000000000000000000000000000000000000000",
+      tokenDecimals: Number(process.env["WDK_TOKEN_DECIMALS"] ?? 6),
+      topePorOperacionInCents: Number(process.env["WDK_TOPE_OPERACION"] ?? 15_000),
+      topeDiarioInCents: Number(process.env["WDK_TOPE_DIARIO"] ?? 50_000),
+    })
+  : new InMemoryWalletLedger(systemClock, uuidGenerator);
 const wallets = new LedgerConLog(ledgerBase, RED, TOKEN);
 
 const menu = new InMemoryMenuCatalog(demoMenu);
@@ -69,7 +84,9 @@ const oauth = new OAuth({
   ...(googleClientSecret ? { googleClientSecret } : {}),
 });
 
+restaurantePorDefecto.arsPorUsdt = ARS_PER_USDT;
 const semilla = await seedDemo(service, wallets);
+restaurantePorDefecto.walletAddress = semilla.negocio.address;
 const qvacArriba = await recomendadorQvac.disponible();
 
 const server = createServer(createApiHandler({
@@ -82,6 +99,10 @@ const server = createServer(createApiHandler({
   cookieSegura: baseUrl.startsWith("https://"),
   red: RED,
   token: TOKEN,
+  restaurante: restaurantePorDefecto,
+  wdk: usaWdk
+    ? { activo: true, onchain: (ledgerBase as WdkWalletLedger).onchain, paquete: "@tetherto/wdk" }
+    : { activo: false, onchain: false },
 }));
 
 server.listen(port, () => {
@@ -102,6 +123,11 @@ server.listen(port, () => {
   if (!qvacArriba) {
     console.log(`  ${gris("    levantala con:  qvac serve openai --preload <modelo>")}`);
     console.log(`  ${gris("    sin ella las sugerencias salen del plan B, y se avisa en pantalla")}`);
+  }
+  const wdkLedger = usaWdk ? (ledgerBase as WdkWalletLedger) : null;
+  console.log(`  Billetera         ${usaWdk ? ok("WDK @tetherto/wdk") : gris("simulada")}  ${gris(wdkLedger?.onchain ? `on-chain · ${process.env["EVM_RPC_URL"]}` : "sin RPC: WDK deriva y autoriza, el saldo se asienta local")}`);
+  if (wdkLedger) {
+    console.log(`  Políticas WDK     ${ok("activas")}  ${gris(`tope/op ${(Number(process.env["WDK_TOPE_OPERACION"] ?? 15_000) / 100).toFixed(2)} · tope/día ${(Number(process.env["WDK_TOPE_DIARIO"] ?? 50_000) / 100).toFixed(2)} USDT · solo a la caja`)}`);
   }
   console.log(`  Google OAuth      ${oauth.googleConfigurado() ? ok("configurado") : gris("modo demo (sin GOOGLE_CLIENT_ID)")}`);
   console.log(`  Apple             ${gris("modo demo — requiere cuenta Apple Developer paga")}`);

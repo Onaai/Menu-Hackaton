@@ -345,3 +345,10 @@ table.movimientos tr:last-child td { border-bottom: none; }
 .descartes summary { cursor: pointer; padding: 6px 0; }
 .descartes ul { margin: 4px 0 0; padding-left: 20px; }
 .descartes li { margin: 3px 0; }
+
+.metodos { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 12px 0; }
+.metodos button { text-align: left; }
+
+.grilla-admin { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 14px; }
+table.movimientos input[type=text], table.movimientos input:not([type]), table.movimientos input[type=number] { padding: 5px 8px; font-size: 13px; }
+table.movimientos input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--verde); }

@@ -106,6 +106,8 @@ export class InMemoryWalletLedger implements WalletLedger {
         from: from.balanceInCents - debitedInCents,
         to: to.balanceInCents + input.amountInCents,
       },
+      motor: "simulado",
+      onchain: false,
     };
 
     // Vista previa: se calcula todo y no se toca nada.

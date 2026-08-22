@@ -7,10 +7,11 @@
 //   2. La comanda tiene estado POR LÍNEA, no solo por comanda entera.
 //   3. El pago mueve plata de verdad entre billeteras (ver wallet.ts).
 
+import type { ModoDivision, Pago } from "./pago.js";
+
 export type SessionStatus = "OPEN" | "BILL_REQUESTED" | "CLOSED";
 export type OrderStatus = "RECEIVED" | "PREPARING" | "READY" | "DELIVERED";
 export type OrderType = "INITIAL" | "ADDITIONAL";
-export type PaymentMode = "INDIVIDUAL" | "TABLE";
 
 /**
  * Estación de cocina. Es lo que permite que la comanda se PARTA: la barra
@@ -101,27 +102,10 @@ export interface TableSession {
   status: SessionStatus;
   diners: Diner[];
   orders: Order[];
-  payments: SimulatedPayment[];
-  paymentMode?: PaymentMode;
+  payments: Pago[];
+  paymentMode?: ModoDivision;
   openedAt: string;
   updatedAt: string;
-}
-
-export interface SimulatedPayment {
-  id: string;
-  mode: PaymentMode;
-  dinerId?: string;
-  subtotalInCents: number;
-  tipPercent: number;
-  tipInCents: number;
-  totalInCents: number;
-  status: "SIMULATED_APPROVED";
-  createdAt: string;
-  /** Si se pagó con billetera, el id del movimiento. Ver wallet.ts. */
-  transferId?: string;
-  /** Billetera que pagó y billetera que cobró. */
-  fromWalletId?: string;
-  toWalletId?: string;
 }
 
 export interface DinerBill {

@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { DomainError } from "../domain/errors.js";
 import type { LineStatus, OrderStatus } from "../domain/model.js";
 import type { Cuenta } from "../domain/usuario.js";
+import type { Restaurante } from "../domain/restaurante.js";
+import type { MenuItem } from "../domain/model.js";
 import { ARS_PER_USDT } from "../config/cotizacion.js";
 import type { AuthService } from "../application/auth-service.js";
 import type { RestaurantService } from "../application/restaurant-service.js";
@@ -26,6 +28,8 @@ export interface Dependencias {
   cookieSegura: boolean;
   red: string;
   token: string;
+  restaurante: Restaurante;
+  wdk: { activo: boolean; onchain: boolean; paquete?: string };
 }
 
 export function createApiHandler(deps: Dependencias) {
@@ -41,10 +45,12 @@ export function createApiHandler(deps: Dependencias) {
 
       if (method === "GET" && url.pathname === "/api/config") {
         return json(response, 200, {
-          arsPerUsdt: ARS_PER_USDT,
+          arsPerUsdt: deps.restaurante.arsPorUsdt || ARS_PER_USDT,
           red: deps.red,
           token: deps.token,
-          pagosReales: false,
+          restaurante: deps.restaurante,
+          wdk: deps.wdk,
+          pagosReales: deps.wdk.onchain,
           googleConfigurado: oauth.googleConfigurado(),
           appleConfigurado: oauth.appleConfigurado(),
         });
@@ -160,9 +166,9 @@ export function createApiHandler(deps: Dependencias) {
           const tipPercent = Number(url.searchParams.get("tipPercent") ?? 0);
           return json(response, 200, await service.getBill(sessionId, tipPercent));
         }
-        if (method === "POST" && parts[3] === "payments" && parts[4] === "wallet") {
-          const body = await readJson<Parameters<RestaurantService["payWithWallet"]>[1]>(request);
-          const result = await service.payWithWallet(sessionId, body);
+        if (method === "POST" && parts[3] === "payments") {
+          const body = await readJson<Parameters<RestaurantService["pagar"]>[1]>(request);
+          const result = await service.pagar(sessionId, body);
           return json(response, result.preview ? 200 : 201, result);
         }
       }
@@ -242,6 +248,32 @@ export function createApiHandler(deps: Dependencias) {
         return json(response, 200, await wallets.fund(parts[2], body.amountInCents));
       }
 
+      // ── Administración del local ────────────────────────────────────────
+      // Sin login: es una demo y las pantallas del local no están enlazadas
+      // desde la vista del comensal. Para producción, acá va un rol.
+      if (method === "GET" && url.pathname === "/api/admin/restaurante") {
+        return json(response, 200, deps.restaurante);
+      }
+      if (method === "PATCH" && url.pathname === "/api/admin/restaurante") {
+        const body = await readJson<Partial<Restaurante>>(request);
+        aplicarRestaurante(deps.restaurante, body);
+        return json(response, 200, deps.restaurante);
+      }
+      if (method === "PATCH" && parts[0] === "api" && parts[1] === "admin" && parts[2] === "menu" && parts[3]) {
+        const body = await readJson<Partial<MenuItem>>(request);
+        return json(response, 200, await service.editarProducto(parts[3], body));
+      }
+      if (method === "POST" && url.pathname === "/api/admin/menu") {
+        const body = await readJson<Partial<MenuItem> & { name: string }>(request);
+        return json(response, 201, await service.crearProducto(body));
+      }
+      if (method === "DELETE" && parts[0] === "api" && parts[1] === "admin" && parts[2] === "menu" && parts[3]) {
+        return json(response, 200, await service.borrarProducto(parts[3]));
+      }
+      if (method === "GET" && url.pathname === "/api/admin/caja") {
+        return json(response, 200, await service.corteDeCaja());
+      }
+
       // ── Interfaz ────────────────────────────────────────────────────────
       if (method === "GET" && publicDir) {
         const served = await serveStatic(publicDir, url.pathname, response);
@@ -274,6 +306,24 @@ function publico(cuenta: Cuenta) {
     onboardingPendiente: cuenta.onboardingPendiente,
     preferencias: cuenta.preferencias,
   };
+}
+
+/** Aplica solo los campos conocidos: un PATCH no puede inventar propiedades. */
+function aplicarRestaurante(actual: Restaurante, cambios: Partial<Restaurante>): void {
+  const textos = ["nombre", "direccion", "localidad", "telefono", "cuit", "walletAddress", "aliasMp", "moneda"] as const;
+  for (const k of textos) {
+    const v = cambios[k];
+    if (typeof v === "string" && v.trim()) actual[k] = v.trim().slice(0, 120);
+  }
+  if (typeof cambios.arsPorUsdt === "number" && cambios.arsPorUsdt > 0) actual.arsPorUsdt = cambios.arsPorUsdt;
+  if (Array.isArray(cambios.propinasSugeridas)) {
+    const limpias = cambios.propinasSugeridas.map(Number).filter((n) => Number.isFinite(n) && n >= 0 && n <= 100);
+    if (limpias.length) actual.propinasSugeridas = [...new Set(limpias)].sort((a, b) => a - b);
+  }
+  if (Array.isArray(cambios.metodosHabilitados)) {
+    const validos = cambios.metodosHabilitados.filter((m) => ["WALLET", "MERCADO_PAGO", "EFECTIVO"].includes(m));
+    if (validos.length) actual.metodosHabilitados = validos;
+  }
 }
 
 async function readJson<T>(request: IncomingMessage): Promise<T> {

@@ -275,11 +275,11 @@ test("la vista previa del pago no mueve un centavo", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia, wSofia, caja } = await mesaListaParaPagar(service, wallets);
 
-  const r = await service.payWithWallet(mesa.id, { mode: "INDIVIDUAL", tipPercent: 10, dinerId: sofia.id, dryRun: true });
+  const r = await service.pagar(mesa.id, { metodo: "WALLET", modo: "INDIVIDUAL", tipPercent: 10, dinerId: sofia.id, dryRun: true });
 
   assert.equal(r.preview, true);
-  assert.equal(r.payment, undefined, "sin confirmar no hay cobro registrado");
-  assert.equal(r.arsTotalInCents, 520_000 + 52_000);
+  assert.equal(r.pago, undefined, "sin confirmar no hay cobro registrado");
+  assert.equal(r.totalInCents, 520_000 + 52_000);
   assert.equal(r.usdtTotalInCents, arsCentsToUsdtCents(572_000));
   assert.equal((await wallets.getById(wSofia.id))?.balanceInCents, 20_000);
   assert.equal((await wallets.getById(caja.id))?.balanceInCents, 0);
@@ -290,23 +290,23 @@ test("confirmado, la plata llega a la caja del negocio", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia, wSofia, caja } = await mesaListaParaPagar(service, wallets);
 
-  const r = await service.payWithWallet(mesa.id, { mode: "INDIVIDUAL", tipPercent: 10, dinerId: sofia.id, dryRun: false });
+  const r = await service.pagar(mesa.id, { metodo: "WALLET", modo: "INDIVIDUAL", tipPercent: 10, dinerId: sofia.id, dryRun: false });
 
   assert.equal(r.preview, false);
-  assert.ok(r.payment);
-  assert.equal(r.payment!.transferId, r.transfer.id);
-  assert.equal((await wallets.getById(caja.id))?.balanceInCents, r.usdtTotalInCents);
-  assert.equal((await wallets.getById(wSofia.id))?.balanceInCents, 20_000 - r.transfer.debitedInCents);
+  assert.ok(r.pago);
+  assert.equal(r.pago!.transferId, r.transfer!.id);
+  assert.equal((await wallets.getById(caja.id))?.balanceInCents, r.usdtTotalInCents!);
+  assert.equal((await wallets.getById(wSofia.id))?.balanceInCents, 20_000 - r.transfer!.debitedInCents);
 });
 
 test("la mesa se cierra sola cuando pagaron todos los que consumieron", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia, emi } = await mesaListaParaPagar(service, wallets);
 
-  await service.payWithWallet(mesa.id, { mode: "INDIVIDUAL", tipPercent: 0, dinerId: sofia.id, dryRun: false });
+  await service.pagar(mesa.id, { metodo: "WALLET", modo: "INDIVIDUAL", tipPercent: 0, dinerId: sofia.id, dryRun: false });
   assert.equal((await service.getTable(mesa.id)).status, "BILL_REQUESTED", "falta uno");
 
-  await service.payWithWallet(mesa.id, { mode: "INDIVIDUAL", tipPercent: 0, dinerId: emi.id, dryRun: false });
+  await service.pagar(mesa.id, { metodo: "WALLET", modo: "INDIVIDUAL", tipPercent: 0, dinerId: emi.id, dryRun: false });
   assert.equal((await service.getTable(mesa.id)).status, "CLOSED");
 });
 
@@ -316,7 +316,7 @@ test("si no alcanza el saldo, el pago falla y no queda cobro a medias", async ()
 
   // Emi tiene 12 USDT; pagar la mesa entera cuesta más.
   await assert.rejects(
-    () => service.payWithWallet(mesa.id, { mode: "TABLE", tipPercent: 100, walletId: wEmi.id, dryRun: false }),
+    () => service.pagar(mesa.id, { metodo: "WALLET", modo: "TABLE", tipPercent: 100, walletId: wEmi.id, dryRun: false }),
     (e: unknown) => e instanceof DomainError && e.code === "CONFLICT",
   );
 
@@ -331,7 +331,7 @@ test("no se puede pagar antes de pedir la cuenta", async () => {
   await service.placeOrder(ctx.mesa.id, { dinerId: ctx.sofia.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
 
   await assert.rejects(
-    () => service.payWithWallet(ctx.mesa.id, { mode: "TABLE", tipPercent: 0, walletId: ctx.wSofia.id, dryRun: false }),
+    () => service.pagar(ctx.mesa.id, { metodo: "WALLET", modo: "TABLE", tipPercent: 0, walletId: ctx.wSofia.id, dryRun: false }),
     (e: unknown) => e instanceof DomainError && e.code === "INVALID_STATE",
   );
 });
@@ -340,9 +340,9 @@ test("no se pueden mezclar las dos formas de dividir en la misma cuenta", async 
   const { service, wallets } = armar();
   const { mesa, sofia, wSofia } = await mesaListaParaPagar(service, wallets);
 
-  await service.payWithWallet(mesa.id, { mode: "INDIVIDUAL", tipPercent: 0, dinerId: sofia.id, dryRun: false });
+  await service.pagar(mesa.id, { metodo: "WALLET", modo: "INDIVIDUAL", tipPercent: 0, dinerId: sofia.id, dryRun: false });
   await assert.rejects(
-    () => service.payWithWallet(mesa.id, { mode: "TABLE", tipPercent: 0, walletId: wSofia.id, dryRun: false }),
+    () => service.pagar(mesa.id, { metodo: "WALLET", modo: "TABLE", tipPercent: 0, walletId: wSofia.id, dryRun: false }),
     (e: unknown) => e instanceof DomainError && e.code === "CONFLICT",
   );
 });

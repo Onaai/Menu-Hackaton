@@ -58,6 +58,12 @@ export interface Transfer {
   createdAt: string;
   /** Saldos después del movimiento, para poder mostrar el antes y el después. */
   balancesAfter?: { from: number; to: number };
+  /** Quién autorizó: el libro simulado o WDK de verdad. Se muestra en pantalla. */
+  motor?: "simulado" | "wdk";
+  /** true solo si la transacción se mandó a una red real. */
+  onchain?: boolean;
+  /** Hash de la transacción, cuando hubo red. */
+  txHash?: string;
 }
 
 /**

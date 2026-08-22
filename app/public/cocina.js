@@ -40,10 +40,13 @@ function pintar() {
     kpi(summary.urgentes, "urgentes", summary.urgentes ? "var(--rojo)" : null),
   );
 
+  // OJO: `replaceChildren(array)` recibe el arreglo como UN argumento y lo
+  // convierte a texto — de ahí salía el "[object HTMLElement]" en pantalla.
+  // Hay que desparramarlo con spread.
   $("tickets").replaceChildren(
-    tickets.length === 0
-      ? el("div", { class: "panel vacio" }, "No hay nada pendiente. La cocina está al día.")
-      : tickets.map(pintarTicket),
+    ...(tickets.length === 0
+      ? [el("div", { class: "panel vacio" }, "No hay nada pendiente. La cocina está al día.")]
+      : tickets.map(pintarTicket)),
   );
 }
 

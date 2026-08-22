@@ -98,7 +98,7 @@ const escapar = (s) => String(s).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": 
  */
 const NAV = {
   cliente: [["/", "Carta"]],
-  local: [["/cocina.html", "Cocina"], ["/billeteras.html", "Caja"]],
+  local: [["/cocina.html", "Cocina"], ["/billeteras.html", "Billeteras"], ["/admin.html", "Administración"]],
 };
 
 export function montarBarra(activa, zona = "cliente", extra = null) {

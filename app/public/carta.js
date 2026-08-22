@@ -478,44 +478,82 @@ function pintarCuenta() {
 }
 
 function formularioPago(s) {
+  const r = estado.config.restaurante ?? {};
+  const habilitados = r.metodosHabilitados ?? ["WALLET", "MERCADO_PAGO", "EFECTIVO"];
+  const NOMBRE = { WALLET: "💳 Billetera USD₮", MERCADO_PAGO: "🔵 Mercado Pago", EFECTIVO: "💵 Efectivo" };
+
   const caja = el("div");
-  const selModo = el("select", {},
-    el("option", { value: "INDIVIDUAL" }, "Cada uno lo suyo"),
-    el("option", { value: "TABLE" }, "Uno paga todo"));
-  const selPropina = el("select", {},
-    ...[0, 5, 10, 15].map((p) => el("option", { value: p, selected: p === 10 }, `${p}% de propina`)));
+  const salida = el("div", { style: "margin-top:12px" });
+
+  let metodo = habilitados[0];
+  let modo = "INDIVIDUAL";
+  let propina = (r.propinasSugeridas ?? [0, 5, 10, 15]).includes(10) ? 10 : 0;
+
+  const selModo = el("select", { onchange: (e) => { modo = e.target.value; salida.replaceChildren(); } },
+    el("option", { value: "INDIVIDUAL" }, "Pago lo mío"),
+    el("option", { value: "TABLE" }, "Pago toda la mesa"));
+
+  const selPropina = el("select", { onchange: (e) => { propina = Number(e.target.value); salida.replaceChildren(); } },
+    ...(r.propinasSugeridas ?? [0, 5, 10, 15]).map((p) =>
+      el("option", { value: p, selected: p === propina }, p === 0 ? "Sin propina" : `${p}% de propina`)));
+
   const selBillet = el("select", {},
     ...estado.billeteras.filter((w) => w.kind === "CLIENT")
       .map((w) => el("option", { value: w.id }, `${w.label} — ${usdt(w.balanceInCents)}`)));
-
   const comensal = s.diners.find((d) => d.id === estado.comensalId);
   if (comensal?.walletId) selBillet.value = comensal.walletId;
 
-  const salida = el("div", { style: "margin-top:12px" });
+  const efectivo = el("input", { type: "number", min: "0", step: "100", placeholder: "¿con cuánto pagás?", style: "width:100%" });
 
-  async function preparar(dryRun) {
+  const extra = el("div");
+  function pintarExtra() {
+    if (metodo === "WALLET") {
+      extra.replaceChildren(
+        el("div", { class: "opcion" }, el("label", {}, "Con qué billetera"), selBillet),
+        el("p", { class: "sub", style: "font-size:11.5px;margin:0" },
+          `Cobra ${r.nombre ?? "el local"} en ${(r.walletAddress ?? "").slice(0, 10)}…${(r.walletAddress ?? "").slice(-6)}`));
+    } else if (metodo === "EFECTIVO") {
+      extra.replaceChildren(
+        el("div", { class: "opcion" }, el("label", {}, "Pagás con"), efectivo,
+          el("p", { class: "sub", style: "font-size:11.5px;margin:6px 0 0" }, "Dejalo vacío si pagás justo.")));
+    } else {
+      extra.replaceChildren(
+        el("div", { class: "aviso", style: "margin-top:10px" },
+          el("div", {}, `Alias: ${r.aliasMp ?? "—"}`),
+          el("div", { style: "font-size:12px;color:var(--tenue);margin-top:4px" }, "Aprobación simulada, al instante.")));
+    }
+  }
+
+  const botones = el("div", { class: "metodos" },
+    ...habilitados.map((m) => {
+      const b = el("button", {
+        class: m === metodo ? "primario" : "",
+        onclick: () => {
+          metodo = m;
+          salida.replaceChildren();
+          for (const otro of botones.children) otro.className = "";
+          b.className = "primario";
+          pintarExtra();
+        },
+      }, NOMBRE[m] ?? m);
+      return b;
+    }));
+
+  async function cobrar(dryRun) {
     const cuerpo = {
-      mode: selModo.value,
-      tipPercent: Number(selPropina.value),
-      walletId: selBillet.value,
-      dryRun,
-      ...(selModo.value === "INDIVIDUAL" ? { dinerId: estado.comensalId } : {}),
+      metodo, modo, tipPercent: propina, dryRun,
+      ...(modo === "INDIVIDUAL" ? { dinerId: estado.comensalId } : {}),
+      ...(metodo === "WALLET" ? { walletId: selBillet.value } : {}),
+      ...(metodo === "EFECTIVO" && efectivo.value ? { recibidoInCents: Math.round(Number(efectivo.value) * 100) } : {}),
     };
     try {
-      const r = await api(`/api/tables/${s.id}/payments/wallet`, { method: "POST", body: JSON.stringify(cuerpo) });
-      if (r.preview) {
-        salida.replaceChildren(
-          el("div", { class: "aviso" },
-            el("div", {}, `Total: ${pesos(r.arsTotalInCents)}`),
-            el("div", {}, `= ${usdt(r.usdtTotalInCents)}  (1 USDT = $${estado.config.arsPerUsdt.toLocaleString("es-AR")})`),
-            el("div", { style: "color:var(--tenue);font-size:12px;margin-top:6px" },
-              `comisión de red ${usdt(r.transfer.feeInCents)} · sale de tu billetera ${usdt(r.transfer.debitedInCents)}`),
-            el("div", { style: "color:var(--tenue);font-size:12px" }, `te queda ${usdt(r.transfer.balancesAfter.from)}`)),
-          el("button", { class: "verde", style: "width:100%;margin-top:10px", onclick: () => preparar(false) },
-            `Confirmar y pagar ${usdt(r.usdtTotalInCents)}`),
-        );
+      const res = await api(`/api/tables/${s.id}/payments`, { method: "POST", body: JSON.stringify(cuerpo) });
+      if (res.preview) {
+        salida.replaceChildren(vistaPrevia(res), el("button", {
+          class: "verde", style: "width:100%;margin-top:10px", onclick: () => cobrar(false),
+        }, `Confirmar ${pesos(res.totalInCents)}`));
       } else {
-        avisar(`Pagado. ${usdt(r.transfer.amountInCents)} llegaron a la caja.`);
+        avisar(comprobante(res));
         await cargar();
       }
     } catch (e) {
@@ -523,14 +561,40 @@ function formularioPago(s) {
     }
   }
 
+  function vistaPrevia(res) {
+    const filas = [el("div", { style: "font-weight:700" }, `Total: ${pesos(res.totalInCents)}`)];
+    if (metodo === "WALLET" && res.transfer) {
+      filas.push(
+        el("div", {}, `= ${usdt(res.usdtTotalInCents)}  (1 USDT = $${(estado.config.arsPerUsdt ?? 1480).toLocaleString("es-AR")})`),
+        el("div", { style: "color:var(--tenue);font-size:12px;margin-top:6px" },
+          `comisión ${usdt(res.transfer.feeInCents)} · sale ${usdt(res.transfer.debitedInCents)} · te queda ${usdt(res.transfer.balancesAfter.from)}`),
+        el("div", { class: "chip dieta", style: "margin-top:8px" },
+          res.transfer.motor === "wdk" ? (res.transfer.onchain ? "WDK · on-chain" : "WDK · autoriza y firma local") : "simulado"),
+      );
+    }
+    if (metodo === "EFECTIVO") {
+      filas.push(
+        el("div", {}, `Entregás ${pesos(res.recibidoInCents)}`),
+        el("div", { style: "font-size:19px;font-weight:700;color:var(--verde);margin-top:6px" },
+          `Tu vuelto: ${pesos(res.vueltoInCents)}`));
+    }
+    return el("div", { class: "aviso" }, ...filas);
+  }
+
+  function comprobante(res) {
+    if (res.pago?.vueltoInCents) return `Cobrado. Vuelto: ${pesos(res.pago.vueltoInCents)}`;
+    if (res.pago?.referenciaMp) return `Aprobado por Mercado Pago · ${res.pago.referenciaMp}`;
+    if (res.transfer?.txHash) return `Enviado on-chain · ${res.transfer.txHash.slice(0, 14)}…`;
+    return `Pagado ${pesos(res.totalInCents)}.`;
+  }
+
+  pintarExtra();
   caja.append(
-    el("div", { class: "fila", style: "margin:10px 0" }, selModo),
-    el("div", { class: "fila", style: "margin:10px 0" }, selPropina),
-    el("div", { class: "fila", style: "margin:10px 0" }, selBillet),
-    el("button", { class: "primario", style: "width:100%", onclick: () => preparar(true) }, "Ver el detalle antes de pagar"),
+    el("div", { class: "fila", style: "margin:10px 0" }, selModo, selPropina),
+    botones,
+    extra,
+    el("button", { class: "primario", style: "width:100%;margin-top:12px", onclick: () => cobrar(true) }, "Ver el detalle"),
     salida,
-    el("p", { class: "sub", style: "margin-top:14px;font-size:11.5px" },
-      "Pagos simulados. Se muestra el detalle antes de mover un centavo, igual que exige send_token de WDK con dryRun."),
   );
   return caja;
 }

@@ -47,6 +47,19 @@ export class InMemoryMenuCatalog implements MenuCatalog {
     item.available = available;
     return structuredClone(item);
   }
+
+  async upsert(item: MenuItem): Promise<MenuItem> {
+    const i = this.items.findIndex((x) => x.id === item.id);
+    if (i === -1) this.items.push(structuredClone(item));
+    else this.items[i] = structuredClone(item);
+    return structuredClone(item);
+  }
+
+  async remove(id: string): Promise<void> {
+    const i = this.items.findIndex((x) => x.id === id);
+    assertDomain(i !== -1, "NOT_FOUND", `No existe el producto ${id}.`);
+    this.items.splice(i, 1);
+  }
 }
 
 export const systemClock: Clock = { now: () => new Date() };

@@ -13,6 +13,9 @@ export interface MenuCatalog {
   list(): Promise<MenuItem[]>;
   /** La cocina marca un producto sin stock y desaparece de la carta de todos. */
   setAvailability(id: string, available: boolean): Promise<MenuItem>;
+  /** El encargado edita la carta desde /admin.html. */
+  upsert(item: MenuItem): Promise<MenuItem>;
+  remove(id: string): Promise<void>;
 }
 
 export interface Clock {

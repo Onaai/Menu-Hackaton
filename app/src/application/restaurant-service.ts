@@ -9,11 +9,10 @@ import type {
   Order,
   OrderItem,
   OrderStatus,
-  PaymentMode,
-  SimulatedPayment,
   Station,
   TableSession,
 } from "../domain/model.js";
+import { calcularVuelto, METODOS, NOMBRE_METODO, type CorteDeCaja, type MetodoPago, type ModoDivision, type Pago } from "../domain/pago.js";
 import { arsCentsToUsdtCents } from "../config/cotizacion.js";
 import type { Clock, IdGenerator, MenuCatalog, SessionRepository, WalletLedger } from "./ports.js";
 
@@ -31,22 +30,27 @@ export interface PlaceOrderInput {
   note?: string;
 }
 
-export interface WalletPaymentInput {
-  mode: PaymentMode;
+export interface PagoInput {
+  metodo: MetodoPago;
+  modo: ModoDivision;
   tipPercent: number;
   dinerId?: string;
   /** Billetera que paga. Si se omite, se usa la del comensal. */
   walletId?: string;
-  /** true = vista previa, no mueve saldo. Igual que `send_token` de WDK. */
+  /** Solo EFECTIVO: con cuánto paga, para calcular el vuelto. */
+  recibidoInCents?: number;
+  /** true = vista previa. Solo cambia algo con WALLET y con EFECTIVO. */
   dryRun?: boolean;
 }
 
-export interface WalletPaymentResult {
+export interface ResultadoPago {
   preview: boolean;
-  arsTotalInCents: number;
-  usdtTotalInCents: number;
-  transfer: Awaited<ReturnType<WalletLedger["transfer"]>>;
-  payment?: SimulatedPayment;
+  totalInCents: number;
+  usdtTotalInCents?: number;
+  transfer?: Awaited<ReturnType<WalletLedger["transfer"]>>;
+  recibidoInCents?: number;
+  vueltoInCents?: number;
+  pago?: Pago;
 }
 
 const nextStatus: Record<OrderStatus, OrderStatus | null> = {
@@ -86,6 +90,66 @@ export class RestaurantService {
   /** El botón "sin stock" de la cocina. */
   async setMenuAvailability(menuItemId: string, available: boolean): Promise<MenuItem> {
     return this.menu.setAvailability(menuItemId, available);
+  }
+
+  /**
+   * Edición de la carta por el encargado.
+   *
+   * Solo se pisan los campos que vienen. Un PATCH parcial que borrara lo que
+   * no mandaste sería una forma muy rápida de perder la carta entera por
+   * tocar un precio.
+   */
+  async editarProducto(id: string, cambios: Partial<MenuItem>): Promise<MenuItem> {
+    const actual = await this.menu.getById(id);
+    assertDomain(actual, "NOT_FOUND", `No existe el producto ${id}.`);
+    const item: MenuItem = { ...actual };
+
+    if (typeof cambios.name === "string" && cambios.name.trim()) item.name = cambios.name.trim().slice(0, 80);
+    if (typeof cambios.description === "string") item.description = cambios.description.trim().slice(0, 240);
+    if (typeof cambios.category === "string" && cambios.category.trim()) item.category = cambios.category.trim().slice(0, 40);
+    if (typeof cambios.priceInCents === "number") {
+      assertDomain(Number.isInteger(cambios.priceInCents) && cambios.priceInCents > 0, "VALIDATION_ERROR", "El precio debe ser un entero positivo en centavos.");
+      item.priceInCents = cambios.priceInCents;
+    }
+    if (typeof cambios.available === "boolean") item.available = cambios.available;
+    if (typeof cambios.prepMinutes === "number" && cambios.prepMinutes >= 0) item.prepMinutes = cambios.prepMinutes;
+    if (typeof cambios.image === "string") item.image = cambios.image.trim();
+    if (Array.isArray(cambios.diet)) item.diet = cambios.diet.map(String).slice(0, 5);
+    if (typeof cambios.station === "string") item.station = cambios.station as Station;
+
+    return this.menu.upsert(item);
+  }
+
+  async crearProducto(datos: Partial<MenuItem> & { name: string }): Promise<MenuItem> {
+    const nombre = String(datos.name ?? "").trim();
+    assertDomain(nombre.length >= 2, "VALIDATION_ERROR", "El nombre del producto es obligatorio.");
+    const id = (datos.id ?? nombre)
+      .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+    assertDomain(id.length >= 2, "VALIDATION_ERROR", "No se pudo derivar un identificador del nombre.");
+    assertDomain(!(await this.menu.getById(id)), "CONFLICT", `Ya existe un producto con el id ${id}.`);
+
+    return this.menu.upsert({
+      id,
+      name: nombre,
+      description: String(datos.description ?? "").slice(0, 240),
+      category: String(datos.category ?? "Otros").slice(0, 40),
+      priceInCents: Number.isInteger(datos.priceInCents) && (datos.priceInCents as number) > 0 ? (datos.priceInCents as number) : 100_000,
+      available: datos.available ?? true,
+      station: (datos.station as Station) ?? "PARRILLA",
+      prepMinutes: typeof datos.prepMinutes === "number" ? datos.prepMinutes : 10,
+      ...(datos.image ? { image: String(datos.image) } : {}),
+      ...(Array.isArray(datos.diet) ? { diet: datos.diet.map(String) } : {}),
+    });
+  }
+
+  /** Borrar no puede romper una comanda viva: se chequea antes. */
+  async borrarProducto(id: string): Promise<{ ok: true }> {
+    const enUso = (await this.sessions.list()).some((s) =>
+      s.status !== "CLOSED" && s.orders.some((o) => o.items.some((i) => i.menuItemId === id && i.status !== "CANCELLED")));
+    assertDomain(!enUso, "CONFLICT", "Ese producto está en un pedido abierto. Marcalo sin stock en vez de borrarlo.");
+    await this.menu.remove(id);
+    return { ok: true };
   }
 
   // ── Mesa y comensales ────────────────────────────────────────────────────
@@ -512,91 +576,170 @@ export class RestaurantService {
     return this.buildBill(session, tipPercent);
   }
 
-  // ── Pago con billetera ───────────────────────────────────────────────────
+  // ── Pago ─────────────────────────────────────────────────────────────────
 
   /**
-   * Paga con billetera.
+   * Cobra. Tres métodos, un solo camino.
    *
-   * El flujo copia el de `send_token` de WDK a propósito:
+   * Los tres comparten cómo se calcula qué se debe (subtotal + propina, del
+   * comensal o de toda la mesa) y en qué queda la mesa después. Lo único que
+   * cambia es cómo entra la plata:
    *
-   *   1. `dryRun: true`  → devuelve la vista previa con la comisión calculada
-   *                        y NO mueve un centavo.
-   *   2. la persona ve el importe, la comisión y el total.
-   *   3. `dryRun: false` → recién ahí se mueve la plata.
+   *   WALLET        → WDK. La transferencia la autoriza el motor de políticas.
+   *   MERCADO_PAGO  → aprobación simulada, con referencia.
+   *   EFECTIVO      → se declara con cuánto paga y se calcula el vuelto.
    *
-   * La descripción de `send_token` en el código de WDK dice textualmente que
-   * hay que hacer eso. Nosotros lo hacemos cumplir con el tipo, no con una
-   * frase amable: la vista previa devuelve `payment: undefined`, así que un
-   * cliente que se saltee el paso 3 no registra ningún cobro.
+   * `dryRun` solo tiene sentido para WALLET, porque es el único que puede
+   * previsualizar una comisión antes de mover nada — y lo hace porque
+   * `send_token`/`transfer` de WDK está pensado así.
    */
-  async payWithWallet(sessionId: string, input: WalletPaymentInput): Promise<WalletPaymentResult> {
+  async pagar(sessionId: string, input: PagoInput): Promise<ResultadoPago> {
     const session = await this.requireSession(sessionId);
     assertDomain(session.status === "BILL_REQUESTED", "INVALID_STATE", "Primero se debe solicitar la cuenta.");
     this.validateTip(input.tipPercent);
-    assertDomain(!session.paymentMode || session.paymentMode === input.mode, "CONFLICT", "No se pueden mezclar formas de división en la misma cuenta.");
+    assertDomain(METODOS.includes(input.metodo), "VALIDATION_ERROR", "Método de pago desconocido.");
+    assertDomain(!session.paymentMode || session.paymentMode === input.modo, "CONFLICT", "No se pueden mezclar formas de división en la misma cuenta.");
 
     const bill = this.buildBill(session, input.tipPercent);
     let subtotalInCents = bill.subtotalInCents;
+    let dinerName: string | undefined;
     let walletId = input.walletId;
 
-    if (input.mode === "INDIVIDUAL") {
+    if (input.modo === "INDIVIDUAL") {
       assertDomain(input.dinerId, "VALIDATION_ERROR", "El pago individual requiere un comensal.");
-      const dinerBill = bill.diners.find((d) => d.dinerId === input.dinerId);
-      assertDomain(dinerBill && dinerBill.subtotalInCents > 0, "NOT_FOUND", "El comensal no tiene consumos pendientes.");
-      assertDomain(!dinerBill.paid, "CONFLICT", "El comensal ya pagó su consumo.");
-      subtotalInCents = dinerBill.subtotalInCents;
-      walletId = walletId ?? dinerBill.walletId;
+      const suyo = bill.diners.find((d) => d.dinerId === input.dinerId);
+      assertDomain(suyo && suyo.subtotalInCents > 0, "NOT_FOUND", "El comensal no tiene consumos pendientes.");
+      assertDomain(!suyo.paid, "CONFLICT", `${suyo.dinerName} ya pagó lo suyo.`);
+      subtotalInCents = suyo.subtotalInCents;
+      dinerName = suyo.dinerName;
+      walletId = walletId ?? suyo.walletId;
     } else {
-      assertDomain(session.payments.length === 0, "CONFLICT", "La mesa ya tiene un pago registrado.");
+      const faltantes = bill.diners.filter((d) => d.subtotalInCents > 0 && !d.paid);
+      assertDomain(faltantes.length > 0, "CONFLICT", "La cuenta ya está saldada.");
+      subtotalInCents = faltantes.reduce((s, d) => s + d.subtotalInCents, 0);
     }
-
-    assertDomain(walletId, "VALIDATION_ERROR", "Hace falta indicar con qué billetera se paga.");
-
-    const business = (await this.wallets.list()).find((w) => w.kind === "BUSINESS");
-    assertDomain(business, "NOT_FOUND", "No hay una billetera de negocio configurada.");
 
     const tipInCents = this.calculateTip(subtotalInCents, input.tipPercent);
-    const arsTotalInCents = subtotalInCents + tipInCents;
-    const usdtTotalInCents = arsCentsToUsdtCents(arsTotalInCents);
+    const totalInCents = subtotalInCents + tipInCents;
 
-    const dryRun = input.dryRun ?? true;
-    const transfer = await this.wallets.transfer({
-      fromWalletId: walletId,
-      toWalletId: business.id,
-      amountInCents: usdtTotalInCents,
-      concept: `Mesa ${session.tableNumber} · ${input.mode === "TABLE" ? "cuenta completa" : bill.diners.find((d) => d.dinerId === input.dinerId)?.dinerName ?? "comensal"}`,
-      dryRun,
-    });
-
-    if (dryRun) {
-      return { preview: true, arsTotalInCents, usdtTotalInCents, transfer };
-    }
-
-    session.paymentMode = input.mode;
-    const payment: SimulatedPayment = {
-      id: this.ids.next("payment"),
-      mode: input.mode,
-      ...(input.mode === "INDIVIDUAL" && input.dinerId ? { dinerId: input.dinerId } : {}),
+    const base = {
+      metodo: input.metodo,
+      modo: input.modo,
+      ...(input.dinerId ? { dinerId: input.dinerId } : {}),
+      ...(dinerName ? { dinerName } : {}),
       subtotalInCents,
       tipPercent: input.tipPercent,
       tipInCents,
-      totalInCents: arsTotalInCents,
-      status: "SIMULATED_APPROVED",
+      totalInCents,
+    };
+
+    if (input.metodo === "EFECTIVO") {
+      const recibido = input.recibidoInCents ?? totalInCents;
+      const vuelto = calcularVuelto(totalInCents, recibido);
+      assertDomain(
+        vuelto !== null,
+        "VALIDATION_ERROR",
+        `No alcanza: la cuenta es ${(totalInCents / 100).toLocaleString("es-AR")} y entregó ${(recibido / 100).toLocaleString("es-AR")}.`,
+      );
+      if (input.dryRun) {
+        return { preview: true, totalInCents, vueltoInCents: vuelto, recibidoInCents: recibido };
+      }
+      const pago = this.asentar(session, { ...base, id: this.ids.next("pago"), createdAt: this.clock.now().toISOString(), recibidoInCents: recibido, vueltoInCents: vuelto });
+      return { preview: false, totalInCents, vueltoInCents: vuelto, recibidoInCents: recibido, pago: await this.cerrarSiCorresponde(session, pago) };
+    }
+
+    if (input.metodo === "MERCADO_PAGO") {
+      if (input.dryRun) return { preview: true, totalInCents };
+      const pago = this.asentar(session, {
+        ...base,
+        id: this.ids.next("pago"),
+        createdAt: this.clock.now().toISOString(),
+        referenciaMp: `MP-${this.ids.next("op").slice(-12).toUpperCase()}`,
+      });
+      return { preview: false, totalInCents, pago: await this.cerrarSiCorresponde(session, pago) };
+    }
+
+    // WALLET
+    assertDomain(walletId, "VALIDATION_ERROR", "Hace falta indicar con qué billetera se paga.");
+    const caja = (await this.wallets.list()).find((w) => w.kind === "BUSINESS");
+    assertDomain(caja, "NOT_FOUND", "No hay una billetera de caja configurada.");
+
+    const usdtTotalInCents = arsCentsToUsdtCents(totalInCents);
+    const transfer = await this.wallets.transfer({
+      fromWalletId: walletId,
+      toWalletId: caja.id,
+      amountInCents: usdtTotalInCents,
+      concept: `Mesa ${session.tableNumber} · ${dinerName ?? "cuenta completa"}`,
+      dryRun: input.dryRun ?? true,
+    });
+
+    if (input.dryRun ?? true) {
+      return { preview: true, totalInCents, usdtTotalInCents, transfer };
+    }
+
+    const origen = await this.wallets.getById(walletId);
+    const pago = this.asentar(session, {
+      ...base,
+      id: this.ids.next("pago"),
       createdAt: this.clock.now().toISOString(),
+      usdtTotalInCents,
       transferId: transfer.id,
       fromWalletId: walletId,
-      toWalletId: business.id,
-    };
-    session.payments.push(payment);
+      ...(origen ? { fromAddress: origen.address } : {}),
+      toAddress: caja.address,
+      feeUsdtInCents: transfer.feeInCents,
+      ...(transfer.motor ? { motor: transfer.motor } : {}),
+    });
+    return { preview: false, totalInCents, usdtTotalInCents, transfer, pago: await this.cerrarSiCorresponde(session, pago) };
+  }
 
-    const conConsumo = this.buildBill(session, 0).diners.filter((d) => d.subtotalInCents > 0);
-    const todosPagaron =
-      input.mode === "INDIVIDUAL" &&
-      conConsumo.every((d) => session.payments.some((p) => p.mode === "INDIVIDUAL" && p.dinerId === d.dinerId));
-    if (input.mode === "TABLE" || todosPagaron) session.status = "CLOSED";
+  private asentar(session: TableSession, pago: Pago): Pago {
+    session.paymentMode = pago.modo;
+    session.payments.push(pago);
+    return pago;
+  }
 
+  /** Cierra la mesa cuando ya no queda nadie con consumo sin pagar. */
+  private async cerrarSiCorresponde(session: TableSession, pago: Pago): Promise<Pago> {
+    const pendientes = this.buildBill(session, 0).diners.filter((d) => d.subtotalInCents > 0 && !d.paid);
+    if (pago.modo === "TABLE" || pendientes.length === 0) session.status = "CLOSED";
     await this.touchAndSave(session);
-    return { preview: false, arsTotalInCents, usdtTotalInCents, transfer, payment };
+    return pago;
+  }
+
+  /** Todos los cobros del turno, para el corte de caja. */
+  async corteDeCaja(): Promise<CorteDeCaja> {
+    const sessions = await this.sessions.list();
+    const movimientos = sessions.flatMap((s) => s.payments).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    const porMetodo = METODOS.map((metodo) => {
+      const propios = movimientos.filter((p) => p.metodo === metodo);
+      return {
+        metodo,
+        nombre: NOMBRE_METODO[metodo],
+        cantidad: propios.length,
+        totalInCents: propios.reduce((s, p) => s + p.totalInCents, 0),
+        propinasInCents: propios.reduce((s, p) => s + p.tipInCents, 0),
+      };
+    });
+
+    // Lo que tiene que haber en el cajón: lo cobrado en efectivo menos los
+    // vueltos que se dieron. Si se sumara el "recibido" a secas, la caja
+    // cerraría de más todas las noches.
+    const efectivoEnCajaInCents = movimientos
+      .filter((p) => p.metodo === "EFECTIVO")
+      .reduce((s, p) => s + p.totalInCents, 0);
+
+    return {
+      desde: movimientos[0]?.createdAt ?? this.clock.now().toISOString(),
+      hasta: this.clock.now().toISOString(),
+      totalInCents: movimientos.reduce((s, p) => s + p.totalInCents, 0),
+      propinasInCents: movimientos.reduce((s, p) => s + p.tipInCents, 0),
+      cantidad: movimientos.length,
+      porMetodo,
+      efectivoEnCajaInCents,
+      movimientos: movimientos.slice().reverse(),
+    };
   }
 
   // ── Internos ─────────────────────────────────────────────────────────────
@@ -630,7 +773,7 @@ export class RestaurantService {
       dinerId: diner.id,
       dinerName: diner.name,
       subtotalInCents: subtotalByDiner.get(diner.id) ?? 0,
-      paid: session.payments.some((p) => p.mode === "TABLE" || p.dinerId === diner.id),
+      paid: session.payments.some((p) => p.modo === "TABLE" || p.dinerId === diner.id),
       ...(diner.walletId ? { walletId: diner.walletId } : {}),
     }));
     const subtotalInCents = diners.reduce((sum, d) => sum + d.subtotalInCents, 0);
