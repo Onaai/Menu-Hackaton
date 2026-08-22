@@ -1,0 +1,7 @@
+node_modules/
+salida-menu/
+ocr-evidencia-*.json
+ocr-evidencia-*.csv
+*.log
+.env
+.DS_Store

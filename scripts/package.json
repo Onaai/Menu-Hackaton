@@ -1,0 +1,23 @@
+{
+  "name": "carta-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ingesta local de cartas de restaurante con QVAC: PDF/foto → menu.json",
+  "scripts": {
+    "test": "node prueba-estructura.js",
+    "menu": "node menu-ocr.js ../muestras/Menu.pdf",
+    "menu:mosaicos": "node menu-ocr.js ../muestras/Menu.pdf --solo-mosaicos",
+    "tickets": "node batch-ocr.js ./tickets"
+  },
+  "dependencies": {
+    "@qvac/sdk": "^0.17.1"
+  },
+  "optionalDependencies": {
+    "pdf-to-img": "^4.2.0",
+    "sharp": "^0.33.5"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
