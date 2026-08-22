@@ -1,6 +1,6 @@
 import { api, usdt, pesos, el, montarBarra, avisar } from "./comun.js";
 
-montarBarra("/billeteras.html");
+montarBarra("/billeteras.html", "local");
 
 const $ = (id) => document.getElementById(id);
 

@@ -1,6 +1,5 @@
 import type { WalletLedger } from "../application/ports.js";
 import type { RestaurantService } from "../application/restaurant-service.js";
-import { formatUsdt } from "../domain/wallet.js";
 
 /**
  * Siembra la demo: crea las billeteras y deja una mesa abierta con dos
@@ -44,13 +43,8 @@ export async function seedDemo(service: RestaurantService, wallets: WalletLedger
   return {
     negocio,
     clientes: [sofia, emi],
+    todas: [negocio, sofia, emi],
     mesa,
     comensales: { sofia: dinerSofia, emi: dinerEmi },
-    resumen: [
-      `Mesa ${mesa.tableNumber} abierta · ${mesa.id}`,
-      `  ${negocio.label.padEnd(22)} ${negocio.address}  ${formatUsdt(negocio.balanceInCents)}`,
-      `  ${sofia.label.padEnd(22)} ${sofia.address}  ${formatUsdt(sofia.balanceInCents)}`,
-      `  ${emi.label.padEnd(22)} ${emi.address}  ${formatUsdt(emi.balanceInCents)}`,
-    ],
   };
 }

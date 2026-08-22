@@ -145,6 +145,17 @@ export interface BillSummary {
 
 // ────────────────────────────────────────────────────────────────────────────
 // Vistas de cocina
+//
+// Se organizan por MESA, no por estación.
+//
+// La primera versión partía el tablero en parrilla / fríos / barra / postres.
+// Está bien para una cocina grande con una pantalla por puesto, y está mal
+// para un café: obliga a mirar cuatro listas para saber qué le falta a la
+// mesa 7, y nadie despacha así cuando cocina y barra son la misma persona.
+//
+// Un ticket = una mesa. Adentro, lo que pidió cada uno. Y un cronómetro que
+// arranca cuando entró el pedido más viejo que sigue sin salir, porque esa es
+// la pregunta real de una cocina: *hace cuánto que esta mesa está esperando*.
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface KitchenLine {
@@ -158,40 +169,39 @@ export interface KitchenLine {
   choices?: string[];
 }
 
-/**
- * Un ticket de cocina. Es una comanda vista desde la cocina: con el número de
- * mesa, el nombre del comensal, cuántos minutos lleva esperando y de qué color
- * tiene que aparecer en pantalla.
- */
-export interface KitchenTicket {
+export interface PedidoDeTicket {
   orderId: string;
-  sessionId: string;
-  tableNumber: number;
   dinerName: string;
   type: OrderType;
   status: OrderStatus;
-  rushed: boolean;
   createdAt: string;
-  /** Minutos desde que entró la comanda. Lo calcula el servidor, no el navegador. */
-  ageMinutes: number;
-  /** verde < 5 min · ambar 5–10 · rojo > 10, o si está marcada urgente. */
-  urgency: "verde" | "ambar" | "rojo";
+  /** Segundos desde que entró ESTE pedido. */
+  esperaSegundos: number;
   lines: KitchenLine[];
+}
+
+export interface TicketMesa {
+  sessionId: string;
+  tableNumber: number;
+  /** Momento del pedido pendiente más viejo de la mesa. */
+  desde: string;
+  /** Segundos que lleva esperando la mesa. Lo cuenta el servidor. */
+  esperaSegundos: number;
+  /** verde < 5 min · ambar 5–10 · rojo > 10, o si está marcada urgente. */
+  urgencia: "verde" | "ambar" | "rojo";
+  urgente: boolean;
+  totalPlatos: number;
+  pedidos: PedidoDeTicket[];
 }
 
 export interface KitchenBoard {
   generatedAt: string;
-  /** Tickets agrupados por estación, ya ordenados por prioridad. */
-  stations: Array<{
-    station: Station;
-    pending: number;
-    tickets: KitchenTicket[];
-  }>;
-  /** Resumen para la barra de arriba de la pantalla de cocina. */
+  /** Un ticket por mesa con algo pendiente, del que más espera al que menos. */
+  tickets: TicketMesa[];
   summary: {
-    openTickets: number;
-    lines: number;
-    oldestMinutes: number;
-    rushed: number;
+    mesas: number;
+    platos: number;
+    esperaMaximaSegundos: number;
+    urgentes: number;
   };
 }

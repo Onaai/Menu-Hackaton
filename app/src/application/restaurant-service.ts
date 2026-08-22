@@ -2,7 +2,8 @@ import { assertDomain, DomainError } from "../domain/errors.js";
 import type {
   BillSummary,
   KitchenBoard,
-  KitchenTicket,
+  TicketMesa,
+  PedidoDeTicket,
   LineStatus,
   MenuItem,
   Order,
@@ -13,7 +14,6 @@ import type {
   Station,
   TableSession,
 } from "../domain/model.js";
-import { STATIONS } from "../domain/model.js";
 import { arsCentsToUsdtCents } from "../config/cotizacion.js";
 import type { Clock, IdGenerator, MenuCatalog, SessionRepository, WalletLedger } from "./ports.js";
 
@@ -242,39 +242,44 @@ export class RestaurantService {
   // ── Cocina ───────────────────────────────────────────────────────────────
 
   /**
-   * El tablero de cocina.
+   * El tablero de cocina, un ticket por MESA.
    *
-   * Está agrupado por ESTACIÓN y no por mesa a propósito: el de la parrilla
-   * mira una pantalla y el de la barra otra. Cada ticket trae los minutos que
-   * lleva esperando —calculados en el servidor, no en el navegador, para que
-   * dos pantallas muestren lo mismo— y el color que le corresponde.
+   * La versión anterior partía el tablero por estación (parrilla, fríos,
+   * barra, postres). Sirve en una cocina grande con una pantalla por puesto y
+   * estorba en un café: para saber qué le falta a la mesa 7 había que mirar
+   * cuatro listas, y cuando cocina y barra son la misma persona eso es pura
+   * fricción. `station` sigue en los datos —no cuesta nada y sirve más
+   * adelante— pero ya no organiza la pantalla.
    *
-   * El orden dentro de cada estación es: primero lo marcado urgente, después lo
-   * más viejo. Es el orden en el que una cocina despacha de verdad.
+   * El cronómetro arranca en el pedido pendiente MÁS VIEJO de la mesa, porque
+   * esa es la pregunta que se hace una cocina: hace cuánto que esta mesa está
+   * esperando. Y lo cuenta el servidor, así que dos pantallas muestran lo
+   * mismo aunque una tenga el reloj corrido.
    */
   async getKitchenBoard(): Promise<KitchenBoard> {
     const ahora = this.clock.now();
     const sessions = await this.sessions.list();
+    const tickets: TicketMesa[] = [];
 
-    const todos: KitchenTicket[] = [];
     for (const session of sessions) {
-      for (const order of session.orders) {
-        const activos = order.items.filter((i) => i.status !== "CANCELLED" && i.status !== "DELIVERED");
-        if (activos.length === 0) continue;
+      const pedidos: PedidoDeTicket[] = [];
+      let urgente = false;
 
-        const ageMinutes = Math.max(0, Math.floor((ahora.getTime() - new Date(order.createdAt).getTime()) / 60_000));
-        todos.push({
+      for (const order of session.orders) {
+        const pendientes = order.items
+          .map((item, lineIndex) => ({ item, lineIndex }))
+          .filter(({ item }) => item.status !== "CANCELLED" && item.status !== "DELIVERED");
+        if (pendientes.length === 0) continue;
+
+        if (order.rushed) urgente = true;
+        pedidos.push({
           orderId: order.id,
-          sessionId: session.id,
-          tableNumber: session.tableNumber,
           dinerName: session.diners.find((d) => d.id === order.dinerId)?.name ?? "Comensal",
           type: order.type,
           status: order.status,
-          rushed: order.rushed ?? false,
           createdAt: order.createdAt,
-          ageMinutes,
-          urgency: order.rushed ? "rojo" : ageMinutes >= UMBRAL_ROJO_MIN ? "rojo" : ageMinutes >= UMBRAL_AMBAR_MIN ? "ambar" : "verde",
-          lines: order.items.map((item, lineIndex) => ({
+          esperaSegundos: segundosDesde(order.createdAt, ahora),
+          lines: pendientes.map(({ item, lineIndex }) => ({
             orderId: order.id,
             lineIndex,
             name: item.name,
@@ -286,34 +291,94 @@ export class RestaurantService {
           })),
         });
       }
+
+      if (pedidos.length === 0) continue;
+
+      pedidos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const desde = pedidos[0]!.createdAt;
+      const esperaSegundos = segundosDesde(desde, ahora);
+      const minutos = esperaSegundos / 60;
+
+      tickets.push({
+        sessionId: session.id,
+        tableNumber: session.tableNumber,
+        desde,
+        esperaSegundos,
+        urgente,
+        urgencia: urgente || minutos >= UMBRAL_ROJO_MIN ? "rojo" : minutos >= UMBRAL_AMBAR_MIN ? "ambar" : "verde",
+        totalPlatos: pedidos.reduce((s, p) => s + p.lines.reduce((x, l) => x + l.quantity, 0), 0),
+        pedidos,
+      });
     }
 
-    const stations = STATIONS.map((station) => {
-      const tickets = todos
-        .map((ticket) => ({
-          ...ticket,
-          lines: ticket.lines.filter((l) => l.station === station && l.status !== "CANCELLED" && l.status !== "DELIVERED"),
-        }))
-        .filter((ticket) => ticket.lines.length > 0)
-        .sort((a, b) => Number(b.rushed) - Number(a.rushed) || a.createdAt.localeCompare(b.createdAt));
-
-      return {
-        station,
-        pending: tickets.reduce((sum, t) => sum + t.lines.reduce((s, l) => s + l.quantity, 0), 0),
-        tickets,
-      };
-    });
+    // Primero lo urgente, después lo que más espera. Es el orden en el que se
+    // despacha de verdad.
+    tickets.sort((a, b) => Number(b.urgente) - Number(a.urgente) || b.esperaSegundos - a.esperaSegundos);
 
     return {
       generatedAt: ahora.toISOString(),
-      stations,
+      tickets,
       summary: {
-        openTickets: todos.length,
-        lines: todos.reduce((sum, t) => sum + t.lines.filter((l) => l.status !== "CANCELLED" && l.status !== "DELIVERED").length, 0),
-        oldestMinutes: todos.reduce((max, t) => Math.max(max, t.ageMinutes), 0),
-        rushed: todos.filter((t) => t.rushed).length,
+        mesas: tickets.length,
+        platos: tickets.reduce((s, t) => s + t.totalPlatos, 0),
+        esperaMaximaSegundos: tickets.reduce((m, t) => Math.max(m, t.esperaSegundos), 0),
+        urgentes: tickets.filter((t) => t.urgente).length,
       },
     };
+  }
+
+  /** Marca TODO lo pendiente de una mesa como entregado, de una. */
+  async entregarMesa(sessionId: string): Promise<TableSession> {
+    const session = await this.requireSession(sessionId);
+    let tocado = false;
+    for (const order of session.orders) {
+      for (const item of order.items) {
+        if (item.status !== "CANCELLED" && item.status !== "DELIVERED") {
+          item.status = "DELIVERED";
+          tocado = true;
+        }
+      }
+      this.syncOrderStatus(order);
+      order.updatedAt = this.clock.now().toISOString();
+    }
+    assertDomain(tocado, "INVALID_STATE", "Esta mesa no tiene nada pendiente.");
+    await this.touchAndSave(session);
+    return session;
+  }
+
+  /** Marca un pedido entero como entregado. */
+  async entregarPedido(orderId: string): Promise<Order> {
+    const { session, order } = await this.locateOrder(orderId);
+    let tocado = false;
+    for (const item of order.items) {
+      if (item.status !== "CANCELLED" && item.status !== "DELIVERED") {
+        item.status = "DELIVERED";
+        tocado = true;
+      }
+    }
+    assertDomain(tocado, "INVALID_STATE", "Este pedido ya está entregado.");
+    this.syncOrderStatus(order);
+    order.updatedAt = this.clock.now().toISOString();
+    await this.touchAndSave(session);
+    return order;
+  }
+
+  /**
+   * Marca UNA línea como entregada, sin obligar a pasar por los estados
+   * intermedios. En un café nadie toca "empezar" y después "listo": sale y se
+   * entrega. Los pasos intermedios siguen existiendo para quien los quiera.
+   */
+  async entregarLinea(orderId: string, lineIndex: number): Promise<Order> {
+    const { session, order } = await this.locateOrder(orderId);
+    const item = order.items[lineIndex];
+    assertDomain(item, "NOT_FOUND", "No existe esa línea en la comanda.");
+    assertDomain(item.status !== "CANCELLED", "INVALID_STATE", "La línea está cancelada.");
+    assertDomain(item.status !== "DELIVERED", "INVALID_STATE", "La línea ya está entregada.");
+    item.status = "DELIVERED";
+    this.syncOrderStatus(order);
+    order.updatedAt = this.clock.now().toISOString();
+    await this.touchAndSave(session);
+    return order;
   }
 
   /** Avanza UNA línea. Es como trabaja una cocina: plato por plato. */
@@ -598,6 +663,11 @@ export class RestaurantService {
     session.updatedAt = this.clock.now().toISOString();
     await this.sessions.save(session);
   }
+}
+
+/** Segundos enteros entre un ISO y un momento dado. Nunca negativo. */
+function segundosDesde(iso: string, ahora: Date): number {
+  return Math.max(0, Math.floor((ahora.getTime() - new Date(iso).getTime()) / 1000));
 }
 
 export type { Station };

@@ -85,21 +85,40 @@ function reservaSvg(item) {
 
 const escapar = (s) => String(s).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
 
-/** Barra superior compartida, para no repetir el HTML en tres archivos. */
-export function montarBarra(activa) {
-  const paginas = [
-    ["/", "Carta"],
-    ["/cocina.html", "Cocina"],
-    ["/billeteras.html", "Billeteras"],
-  ];
+/**
+ * Barra superior.
+ *
+ * Hay DOS barras distintas y eso es a propósito: **el cliente no ve la
+ * cocina**. Alguien que escanea el QR de la mesa 7 no tiene por qué poder
+ * abrir el tablero del local, marcar platos como entregados ni mirar la caja.
+ *
+ * Las pantallas del local no están protegidas con contraseña —es una demo—
+ * pero al menos no están enlazadas desde la vista del comensal, que es la
+ * diferencia entre "no se muestra" y "se muestra y encima invita".
+ */
+const NAV = {
+  cliente: [["/", "Carta"]],
+  local: [["/cocina.html", "Cocina"], ["/billeteras.html", "Caja"]],
+};
+
+export function montarBarra(activa, zona = "cliente", extra = null) {
+  const paginas = NAV[zona] ?? NAV.cliente;
   document.body.prepend(
     el("header", { class: "barra" },
       el("div", { class: "marca", html: "MESA <span>ABIERTA</span>" }),
+      zona === "local" ? el("span", { class: "chip" }, "pantalla del local") : null,
       el("nav", { class: "tabs" },
         paginas.map(([href, texto]) =>
-          el("a", { href, class: href === activa ? "activo" : "" }, texto))),
+          el("a", { href, class: href === activa ? "activo" : "" }, texto)),
+        extra),
     ),
   );
+}
+
+/** mm:ss a partir de segundos. Para el cronómetro de cocina. */
+export function reloj(segundos) {
+  const s = Math.max(0, Math.floor(segundos));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /** Muestra un mensaje arriba de todo y lo saca solo. */

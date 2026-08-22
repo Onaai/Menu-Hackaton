@@ -1,47 +1,50 @@
-import { api, el, montarBarra, avisar } from "./comun.js";
+import { api, el, montarBarra, avisar, reloj } from "./comun.js";
 
-montarBarra("/cocina.html");
+montarBarra("/cocina.html", "local");
 
 const $ = (id) => document.getElementById(id);
 
-const NOMBRE_ESTACION = {
-  PARRILLA: "🔥 Parrilla",
-  FRIOS: "🥗 Fríos",
-  BARRA: "🍹 Barra",
-  POSTRES: "🍰 Postres",
-};
-
-// El botón que corresponde a cada estado de una línea. La cocina avanza de a
-// un paso y en un solo sentido; para volver atrás está "deshacer", que es otra
-// acción distinta y a propósito no se confunde con esta.
-const SIGUIENTE = {
-  PENDING: { destino: "PREPARING", texto: "Empezar", clase: "chico" },
-  PREPARING: { destino: "READY", texto: "Listo", clase: "chico verde" },
-  READY: { destino: "DELIVERED", texto: "Entregado", clase: "chico primario" },
-};
-
 let tablero = null;
+/**
+ * Momento en que llegó el tablero, en el reloj del NAVEGADOR.
+ *
+ * El cronómetro se dibuja como `esperaSegundos + (ahora - momentoDeLaCarga)`.
+ * Suena rebuscado y evita un problema real: si el navegador calculara la
+ * espera desde `createdAt`, cualquier diferencia entre el reloj del servidor y
+ * el de la máquina que mira la pantalla se vería como minutos de más o de
+ * menos. Así el número de partida siempre lo pone el servidor —una sola fuente
+ * de verdad para todas las pantallas— y el navegador solo lo hace correr.
+ */
+let cargadoEn = 0;
 
 async function refrescar() {
   try {
     tablero = await api("/api/kitchen/board");
+    cargadoEn = Date.now();
     pintar();
   } catch (e) {
     avisar(e.message, "error");
   }
 }
 
+const transcurrido = (base) => base + (Date.now() - cargadoEn) / 1000;
+
 function pintar() {
-  const { summary, stations } = tablero;
+  const { summary, tickets } = tablero;
 
   $("kpis").replaceChildren(
-    kpi(summary.openTickets, "comandas"),
-    kpi(summary.lines, "platos"),
-    kpi(`${summary.oldestMinutes}′`, "la más vieja", summary.oldestMinutes >= 10 ? "var(--rojo)" : summary.oldestMinutes >= 5 ? "var(--ambar)" : null),
-    kpi(summary.rushed, "urgentes", summary.rushed ? "var(--rojo)" : null),
+    kpi(summary.mesas, "mesas esperando"),
+    kpi(summary.platos, "platos"),
+    kpi(reloj(transcurrido(summary.esperaMaximaSegundos)), "la que más espera",
+      summary.esperaMaximaSegundos >= 600 ? "var(--rojo)" : summary.esperaMaximaSegundos >= 300 ? "var(--ambar)" : null),
+    kpi(summary.urgentes, "urgentes", summary.urgentes ? "var(--rojo)" : null),
   );
 
-  $("estaciones").replaceChildren(...stations.map(pintarEstacion));
+  $("tickets").replaceChildren(
+    tickets.length === 0
+      ? el("div", { class: "panel vacio" }, "No hay nada pendiente. La cocina está al día.")
+      : tickets.map(pintarTicket),
+  );
 }
 
 function kpi(n, l, color) {
@@ -50,65 +53,67 @@ function kpi(n, l, color) {
     el("div", { class: "l" }, l));
 }
 
-function pintarEstacion(est) {
-  return el("section", { class: "estacion" },
-    el("header", {},
-      el("span", {}, NOMBRE_ESTACION[est.station] ?? est.station),
-      el("span", { class: "cuenta" }, `${est.pending} plato${est.pending === 1 ? "" : "s"}`)),
-    el("div", { class: "lista" },
-      est.tickets.length === 0
-        ? el("p", { class: "vacio" }, "Nada pendiente.")
-        : est.tickets.map(pintarTicket)),
-  );
-}
-
 function pintarTicket(t) {
-  return el("article", { class: `ticket ${t.urgency}` },
-    el("div", { class: "cab" },
+  return el("article", { class: `ticket-mesa ${t.urgencia}` },
+    el("header", {},
       el("span", { class: "mesa" }, `Mesa ${t.tableNumber}`),
-      el("span", {}, t.dinerName),
-      t.type === "ADDITIONAL" ? el("span", { class: "chip" }, "agregado") : null,
-      t.rushed ? el("span", { class: "chip", style: "border-color:var(--rojo);color:var(--rojo)" }, "URGENTE") : null,
-      el("span", { class: "edad" }, `${t.ageMinutes}′`)),
+      el("span", { class: "chip" }, `${t.totalPlatos} plato${t.totalPlatos === 1 ? "" : "s"}`),
+      t.urgente ? el("span", { class: "chip urgente" }, "URGENTE") : null,
+      el("span", { class: "crono", "data-base": t.esperaSegundos }, reloj(transcurrido(t.esperaSegundos))),
+    ),
 
-    ...t.lines.map((l) => pintarLinea(t, l)),
+    el("div", { class: "cuerpo" },
+      t.pedidos.map((p) =>
+        el("div", { class: "pedido" },
+          el("div", { class: "quien" },
+            p.dinerName,
+            p.type === "ADDITIONAL" ? el("span", { class: "chip" }, "agregado") : null,
+            el("span", { class: "hace", "data-base": p.esperaSegundos },
+              `hace ${reloj(transcurrido(p.esperaSegundos))}`)),
+          p.lines.map((l) => pintarLinea(l)),
+        )),
+    ),
 
-    el("div", { class: "fila", style: "margin-top:9px;justify-content:flex-end" },
+    el("footer", {},
       el("button", {
         class: "chico",
-        onclick: () => accion(`/api/kitchen/orders/${t.orderId}/rush`, "POST", { rushed: !t.rushed }),
-      }, t.rushed ? "Quitar urgencia" : "Marcar urgente")),
+        onclick: () => accion(`/api/kitchen/orders/${t.pedidos[0].orderId}/rush`, "POST", { rushed: !t.urgente }),
+      }, t.urgente ? "Quitar urgencia" : "Marcar urgente"),
+      el("button", {
+        class: "verde",
+        style: "margin-left:auto",
+        onclick: () => accion(`/api/kitchen/tables/${t.sessionId}/deliver`, "POST"),
+      }, `Entregar toda la mesa ${t.tableNumber}`),
+    ),
   );
 }
 
-function pintarLinea(t, l) {
-  const paso = SIGUIENTE[l.status];
-  return el("div", { class: `tline ${l.status}` },
+function pintarLinea(l) {
+  return el("label", { class: "tline" },
+    // Un checkbox y no un botón: el gesto de la cocina es tildar lo que ya
+    // salió. Se marca y desaparece del ticket en el próximo refresco.
+    el("input", {
+      type: "checkbox",
+      onchange: (e) => {
+        e.target.disabled = true;
+        accion(`/api/kitchen/orders/${l.orderId}/lines/${l.lineIndex}/deliver`, "POST");
+      },
+    }),
     el("span", { class: "cant" }, `${l.quantity}×`),
     el("span", { class: "txt" },
       el("div", {}, l.name),
       l.choices?.length ? el("div", { class: "mod" }, l.choices.join(" · ")) : null,
       l.note ? el("div", { class: "nota" }, `“${l.note}”`) : null),
-    el("span", { class: "acciones" },
-      paso ? el("button", {
-        class: paso.clase,
-        onclick: () => accion(`/api/kitchen/orders/${l.orderId}/lines/${l.lineIndex}`, "PATCH", { status: paso.destino }),
-      }, paso.texto) : null,
-      l.status !== "PENDING" ? el("button", {
-        class: "chico",
-        title: "Deshacer un paso",
-        onclick: () => accion(`/api/kitchen/orders/${l.orderId}/lines/${l.lineIndex}/rollback`, "POST"),
-      }, "↶") : null,
-      el("button", {
-        class: "chico peligro",
-        title: "Cancelar este plato: no se cobra",
-        onclick: () => {
-          if (confirm(`¿Cancelar "${l.name}"? No se le va a cobrar a la mesa.`)) {
-            accion(`/api/kitchen/orders/${l.orderId}/lines/${l.lineIndex}`, "DELETE");
-          }
-        },
-      }, "✕"),
-    ),
+    el("button", {
+      class: "chico peligro",
+      title: "Cancelar: no se le cobra a la mesa",
+      onclick: (e) => {
+        e.preventDefault();
+        if (confirm(`¿Cancelar "${l.name}"? No se le va a cobrar a la mesa.`)) {
+          accion(`/api/kitchen/orders/${l.orderId}/lines/${l.lineIndex}`, "DELETE");
+        }
+      },
+    }, "✕"),
   );
 }
 
@@ -118,6 +123,7 @@ async function accion(ruta, metodo, cuerpo) {
     await refrescar();
   } catch (e) {
     avisar(e.message, "error");
+    await refrescar();
   }
 }
 
@@ -143,8 +149,7 @@ $("btn-stock").addEventListener("click", async () => {
           }
         },
       }),
-      item.name,
-      el("span", { class: "delta" }, item.station)),
+      item.name),
   ));
   $("dlg-stock").showModal();
 });
@@ -153,4 +158,18 @@ $("cerrar-stock").addEventListener("click", () => $("dlg-stock").close());
 // ── Arranque ────────────────────────────────────────────────────────────────
 
 refrescar();
+
+// Dos ritmos distintos a propósito: el cronómetro corre cada segundo sin
+// pedirle nada al servidor, y los datos se traen cada tres. Si se recargara
+// todo cada segundo, el tablero parpadearía y sería imposible tildar nada.
+setInterval(() => {
+  if (!$("chk-auto").checked) return;
+  for (const nodo of document.querySelectorAll(".crono")) {
+    nodo.textContent = reloj(transcurrido(Number(nodo.dataset.base)));
+  }
+  for (const nodo of document.querySelectorAll(".hace")) {
+    nodo.textContent = `hace ${reloj(transcurrido(Number(nodo.dataset.base)))}`;
+  }
+}, 1000);
+
 setInterval(() => { if ($("chk-auto").checked) refrescar(); }, 3000);

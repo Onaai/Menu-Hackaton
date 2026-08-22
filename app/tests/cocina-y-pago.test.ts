@@ -88,56 +88,91 @@ test("si no se elige nada, se aplica la opción marcada por defecto", async () =
 
 // ── Cocina ──────────────────────────────────────────────────────────────────
 
-test("el tablero separa por estación: la barra no espera a la parrilla", async () => {
+const mesaDe = (b: Awaited<ReturnType<RestaurantService["getKitchenBoard"]>>, n: number) =>
+  b.tickets.find((t) => t.tableNumber === n);
+
+test("el tablero agrupa por MESA, no por estación", async () => {
   const { service, wallets } = armar();
-  const { mesa, sofia } = await mesaConDosComensales(service, wallets);
+  const { mesa, sofia, emi } = await mesaConDosComensales(service, wallets);
   await service.placeOrder(mesa.id, {
     dinerId: sofia.id,
     items: [{ menuItemId: "burger", quantity: 1 }, { menuItemId: "limonada", quantity: 2 }],
   });
+  await service.placeOrder(mesa.id, { dinerId: emi.id, items: [{ menuItemId: "risotto", quantity: 1 }] });
 
   const board = await service.getKitchenBoard();
-  const parrilla = board.stations.find((s) => s.station === "PARRILLA")!;
-  const barra = board.stations.find((s) => s.station === "BARRA")!;
 
-  assert.equal(parrilla.tickets.length, 1);
-  assert.equal(parrilla.tickets[0]!.lines.length, 1);
-  assert.equal(parrilla.tickets[0]!.lines[0]!.name, "Burger de la casa");
-  assert.equal(barra.pending, 2); // dos limonadas
-  assert.equal(barra.tickets[0]!.lines[0]!.name, "Limonada de menta");
+  // Un solo ticket, aunque haya tres platos de tres estaciones distintas.
+  assert.equal(board.tickets.length, 1);
+  const ticket = board.tickets[0]!;
+  assert.equal(ticket.tableNumber, 7);
+  assert.equal(ticket.pedidos.length, 2, "los dos comensales van adentro del mismo ticket");
+  assert.equal(ticket.totalPlatos, 4, "1 burger + 2 limonadas + 1 risotto");
+  assert.deepEqual(ticket.pedidos.map((p) => p.dinerName), ["Sofía", "Emi"]);
+  assert.equal(board.summary.mesas, 1);
+  assert.equal(board.summary.platos, 4);
 });
 
-test("el semáforo de demora cambia con el reloj del servidor", async () => {
+test("dos mesas son dos tickets, y manda la que más espera", async () => {
   const { service, wallets, clock } = armar();
   const { mesa, sofia } = await mesaConDosComensales(service, wallets);
   await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
 
-  assert.equal((await service.getKitchenBoard()).stations.find((s) => s.station === "PARRILLA")!.tickets[0]!.urgency, "verde");
-  clock.avanzarMinutos(6);
-  assert.equal((await service.getKitchenBoard()).stations.find((s) => s.station === "PARRILLA")!.tickets[0]!.urgency, "ambar");
-  clock.avanzarMinutos(6);
-  const rojo = (await service.getKitchenBoard()).stations.find((s) => s.station === "PARRILLA")!.tickets[0]!;
-  assert.equal(rojo.urgency, "rojo");
-  assert.equal(rojo.ageMinutes, 12);
+  clock.avanzarMinutos(4);
+  const mesa9 = await service.openTable(9);
+  const juan = await service.joinTable(mesa9.id, "Juan");
+  await service.placeOrder(mesa9.id, { dinerId: juan.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
+
+  const board = await service.getKitchenBoard();
+  assert.equal(board.tickets.length, 2);
+  assert.equal(board.tickets[0]!.tableNumber, 7, "la mesa 7 espera hace más");
 });
 
-test("lo marcado urgente sube al tope de la lista aunque sea más nuevo", async () => {
+test("el cronómetro cuenta desde el pedido pendiente más viejo de la mesa", async () => {
   const { service, wallets, clock } = armar();
   const { mesa, sofia, emi } = await mesaConDosComensales(service, wallets);
   await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
-  clock.avanzarMinutos(3);
-  const segunda = await service.placeOrder(mesa.id, { dinerId: emi.id, items: [{ menuItemId: "risotto", quantity: 1 }] });
+  clock.avanzarMinutos(7);
+  await service.placeOrder(mesa.id, { dinerId: emi.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
 
-  let parrilla = (await service.getKitchenBoard()).stations.find((s) => s.station === "PARRILLA")!;
-  assert.equal(parrilla.tickets[0]!.orderId, (await service.getTable(mesa.id)).orders[0]!.id, "sin urgencia manda la más vieja");
-
-  await service.rushOrder(segunda.id, true);
-  parrilla = (await service.getKitchenBoard()).stations.find((s) => s.station === "PARRILLA")!;
-  assert.equal(parrilla.tickets[0]!.orderId, segunda.id, "la urgente pasa al frente");
-  assert.equal(parrilla.tickets[0]!.urgency, "rojo");
+  const ticket = mesaDe(await service.getKitchenBoard(), 7)!;
+  assert.equal(ticket.esperaSegundos, 420, "7 minutos: el del pedido viejo, no el del nuevo");
+  assert.equal(ticket.pedidos[1]!.esperaSegundos, 0, "cada pedido igual trae el suyo");
 });
 
-test("el estado de la comanda se deduce de sus líneas", async () => {
+test("el semáforo cambia con el reloj del servidor", async () => {
+  const { service, wallets, clock } = armar();
+  const { mesa, sofia } = await mesaConDosComensales(service, wallets);
+  await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
+
+  assert.equal(mesaDe(await service.getKitchenBoard(), 7)!.urgencia, "verde");
+  clock.avanzarMinutos(6);
+  assert.equal(mesaDe(await service.getKitchenBoard(), 7)!.urgencia, "ambar");
+  clock.avanzarMinutos(6);
+  const ticket = mesaDe(await service.getKitchenBoard(), 7)!;
+  assert.equal(ticket.urgencia, "rojo");
+  assert.equal(ticket.esperaSegundos, 720);
+});
+
+test("lo urgente sube al tope aunque espere menos", async () => {
+  const { service, wallets, clock } = armar();
+  const { mesa, sofia } = await mesaConDosComensales(service, wallets);
+  await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
+
+  clock.avanzarMinutos(5);
+  const mesa9 = await service.openTable(9);
+  const juan = await service.joinTable(mesa9.id, "Juan");
+  const nuevo = await service.placeOrder(mesa9.id, { dinerId: juan.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
+
+  assert.equal((await service.getKitchenBoard()).tickets[0]!.tableNumber, 7);
+  await service.rushOrder(nuevo.id, true);
+  const board = await service.getKitchenBoard();
+  assert.equal(board.tickets[0]!.tableNumber, 9);
+  assert.equal(board.tickets[0]!.urgencia, "rojo");
+  assert.equal(board.summary.urgentes, 1);
+});
+
+test("entregar una línea la saca del ticket", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia } = await mesaConDosComensales(service, wallets);
   const orden = await service.placeOrder(mesa.id, {
@@ -145,45 +180,57 @@ test("el estado de la comanda se deduce de sus líneas", async () => {
     items: [{ menuItemId: "burger", quantity: 1 }, { menuItemId: "limonada", quantity: 1 }],
   });
 
-  assert.equal(orden.status, "RECEIVED");
-  let actual = await service.advanceLine(orden.id, 1, "PREPARING"); // solo la limonada
-  assert.equal(actual.status, "PREPARING", "una línea en marcha ya mueve la comanda");
-
-  actual = await service.advanceLine(orden.id, 1, "READY");
-  assert.equal(actual.status, "PREPARING", "sigue PREPARING porque la burger no arrancó");
-
-  await service.advanceLine(orden.id, 0, "PREPARING");
-  actual = await service.advanceLine(orden.id, 0, "READY");
-  assert.equal(actual.status, "READY", "recién cuando están las dos");
+  await service.entregarLinea(orden.id, 1);
+  const ticket = mesaDe(await service.getKitchenBoard(), 7)!;
+  assert.equal(ticket.totalPlatos, 1);
+  assert.deepEqual(ticket.pedidos[0]!.lines.map((l) => l.name), ["Burger de la casa"]);
 });
 
-test("no se puede saltear un paso", async () => {
+test("entregar sin pasar por los estados intermedios es válido", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia } = await mesaConDosComensales(service, wallets);
   const orden = await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
 
+  // En un café nadie toca "empezar" y después "listo": sale y se entrega.
+  const actualizado = await service.entregarLinea(orden.id, 0);
+  assert.equal(actualizado.items[0]!.status, "DELIVERED");
+  assert.equal(actualizado.status, "DELIVERED");
+});
+
+test("no se puede entregar dos veces la misma línea", async () => {
+  const { service, wallets } = armar();
+  const { mesa, sofia } = await mesaConDosComensales(service, wallets);
+  const orden = await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
+  await service.entregarLinea(orden.id, 0);
   await assert.rejects(
-    () => service.advanceLine(orden.id, 0, "READY"),
+    () => service.entregarLinea(orden.id, 0),
     (e: unknown) => e instanceof DomainError && e.code === "INVALID_STATE",
   );
 });
 
-test("deshacer retrocede exactamente un paso", async () => {
+test("entregar la mesa entera vacía el ticket de una", async () => {
   const { service, wallets } = armar();
-  const { mesa, sofia } = await mesaConDosComensales(service, wallets);
-  const orden = await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
+  const { mesa, sofia, emi } = await mesaConDosComensales(service, wallets);
+  await service.placeOrder(mesa.id, { dinerId: sofia.id, items: [{ menuItemId: "burger", quantity: 1 }] });
+  await service.placeOrder(mesa.id, { dinerId: emi.id, items: [{ menuItemId: "limonada", quantity: 2 }] });
 
-  await service.advanceLine(orden.id, 0, "PREPARING");
-  await service.advanceLine(orden.id, 0, "READY");
-  const vuelto = await service.rollbackLine(orden.id, 0);
-  assert.equal(vuelto.items[0]!.status, "PREPARING");
+  await service.entregarMesa(mesa.id);
 
-  await service.rollbackLine(orden.id, 0);
-  const alPrincipio = await service.rollbackLine(orden.id, 0).catch((e) => e);
-  assert.ok(alPrincipio instanceof DomainError, "en PENDING ya no hay hacia dónde volver");
+  assert.equal((await service.getKitchenBoard()).tickets.length, 0);
+  const sesion = await service.getTable(mesa.id);
+  assert.ok(sesion.orders.every((o) => o.status === "DELIVERED"));
 });
 
-test("una línea cancelada no se cobra y sale del tablero", async () => {
+test("entregar una mesa sin nada pendiente es un error", async () => {
+  const { service, wallets } = armar();
+  const { mesa } = await mesaConDosComensales(service, wallets);
+  await assert.rejects(
+    () => service.entregarMesa(mesa.id),
+    (e: unknown) => e instanceof DomainError && e.code === "INVALID_STATE",
+  );
+});
+
+test("una línea cancelada no se cobra y sale del ticket", async () => {
   const { service, wallets } = armar();
   const { mesa, sofia } = await mesaConDosComensales(service, wallets);
   const orden = await service.placeOrder(mesa.id, {
@@ -192,12 +239,11 @@ test("una línea cancelada no se cobra y sale del tablero", async () => {
   });
 
   const antes = await service.getBill(mesa.id, 0);
-  await service.cancelLine(orden.id, 1); // la limonada
+  await service.cancelLine(orden.id, 1);
   const despues = await service.getBill(mesa.id, 0);
 
   assert.equal(antes.subtotalInCents - despues.subtotalInCents, 520_000);
-  const barra = (await service.getKitchenBoard()).stations.find((s) => s.station === "BARRA")!;
-  assert.equal(barra.tickets.length, 0);
+  assert.equal(mesaDe(await service.getKitchenBoard(), 7)!.totalPlatos, 1);
 });
 
 test("marcar sin stock saca el producto de la carta y bloquea el pedido", async () => {
@@ -218,11 +264,9 @@ test("marcar sin stock saca el producto de la carta y bloquea el pedido", async 
 
 async function mesaListaParaPagar(service: RestaurantService, wallets: InMemoryWalletLedger) {
   const ctx = await mesaConDosComensales(service, wallets);
-  const o1 = await service.placeOrder(ctx.mesa.id, { dinerId: ctx.sofia.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
-  const o2 = await service.placeOrder(ctx.mesa.id, { dinerId: ctx.emi.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
-  for (const o of [o1, o2]) await service.updateOrderStatus(o.id, "PREPARING");
-  for (const o of [o1, o2]) await service.updateOrderStatus(o.id, "READY");
-  for (const o of [o1, o2]) await service.updateOrderStatus(o.id, "DELIVERED");
+  await service.placeOrder(ctx.mesa.id, { dinerId: ctx.sofia.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
+  await service.placeOrder(ctx.mesa.id, { dinerId: ctx.emi.id, items: [{ menuItemId: "limonada", quantity: 1 }] });
+  await service.entregarMesa(ctx.mesa.id);
   await service.requestBill(ctx.mesa.id, true);
   return ctx;
 }
