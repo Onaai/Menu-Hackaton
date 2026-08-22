@@ -1,0 +1,15 @@
+Fotos de los platos.
+
+Poné acá los archivos con el nombre que figura en `image` de
+src/config/demo-menu.ts. Por ejemplo:
+
+    burrata.jpg   papas-bravas.jpg   burger.jpg   risotto.jpg
+    pesca.jpg     volcan.jpg         gin-citrico.jpg   limonada.jpg
+
+Si el archivo NO está, la interfaz dibuja sola un placeholder generado a
+partir del nombre del plato: mismo color siempre para el mismo nombre, con
+el icono de su categoria. Nunca se ve un recuadro roto y no se descarga
+nada de internet.
+
+O sea: se puede mostrar el producto sin una sola foto, y cuando el local
+mande las suyas aparecen sin tocar una linea de codigo.

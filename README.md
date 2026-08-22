@@ -1,94 +1,132 @@
-# Carta — la carta de un local, leída sola y sin salir de su máquina
+# Mesa Abierta
 
-**Aleph Hackathon · agosto 2026 · track QVAC + General**
+**Aleph Hackathon · agosto 2026**
 
-Un local le saca una foto a la carta que ya tiene y en veinte minutos tiene un
-menú que funciona: categorías, platos, descripciones, restricciones de dieta y
-opciones de personalización. **Toda la lectura corre en la máquina del local**
-—sin nube, sin cuenta, sin internet— y el sistema **marca lo que no pudo leer con
-seguridad** en vez de inventarlo.
+Pedidos por QR para restaurantes. Cada persona de la mesa ve la carta en su
+teléfono, arma su pedido con las opciones que quiera, y la cocina lo recibe
+partido por estación. Al final se paga junto o por separado, desde una
+billetera, y la plata llega a la caja del local.
 
-El comensal escanea el QR de su mesa, ve la carta en su teléfono sin instalar
-nada, arma el pedido con sus opciones, y —si es celíaco— filtra la carta y ve de
-una qué puede comer.
+```bat
+cd app
+npm install
+npm run dev
+```
+
+→ **[`docs/02-como-correrlo.md`](docs/02-como-correrlo.md)** tiene el paso a
+paso completo, incluido cómo bajarlo a `C:\hack` y el recorrido de la demo.
 
 ---
 
-## Por dónde empezar
+## Las tres pantallas
 
-| Documento | Qué hay adentro |
+| | |
 |---|---|
-| **[`docs/00-decision.md`](docs/00-decision.md)** | **Leer primero.** Los tracks de Tether, cuál elegimos y por qué, el alcance, y el plan hora por hora |
-| [`docs/01-como-corre-el-ocr.md`](docs/01-como-corre-el-ocr.md) | Cómo correr el OCR sobre el PDF, qué devuelve, y qué está probado y qué no |
-| [`docs/contexto/`](docs/contexto/) | Los documentos de trabajo previos, conservados enteros |
+| **`/`** · Carta | Lo que ve el comensal. Platos con foto, filtro de dieta, personalización, carrito, cuenta y pago |
+| **`/cocina.html`** · Cocina | El tablero de la cocina. Por estación, con demora, urgencias y sin stock |
+| **`/billeteras.html`** · Billeteras | Los saldos y los movimientos. Se ve llegar la plata a la caja |
+
+Abrilas en tres pestañas y dejalas: se actualizan solas, así que lo que hacés en
+una aparece en las otras. Eso es la demo.
 
 ---
 
-## Arrancar
+## Lo que hace, y por qué está hecho así
 
-```bash
-cd scripts
-npm install pdf-to-img sharp
+### La cocina no es una lista de pedidos
 
-node prueba-estructura.js                              # 5 s · no toca QVAC
-node menu-ocr.js ../muestras/Menu.pdf --solo-mosaicos  # 10 s · no toca QVAC
-node menu-ocr.js ../muestras/Menu.pdf                  # el de verdad
-```
+- **Se parte por estación.** La barra arranca la limonada mientras la parrilla
+  hace la burger. Ninguna espera a la otra. Sin esto, una cocina real no usa el
+  sistema.
+- **El estado va por línea, no por comanda.** Un plato puede estar listo y otro
+  del mismo pedido todavía no. El estado de la comanda **se deduce** de sus
+  líneas — nunca se guardan los dos por separado, porque tarde o temprano dirían
+  cosas distintas y la mesa vería "listo" mientras la cocina ve "pendiente".
+- **La demora la cuenta el servidor**, no el navegador, así que dos pantallas de
+  cocina muestran siempre lo mismo. Verde hasta 5 minutos, ámbar hasta 10, rojo
+  después.
+- **Se puede deshacer.** En una cocina real alguien toca el botón de más.
+- **Se puede cancelar un plato**, y entonces no se cobra.
+- **Sin stock en un toque**: se acabó el salmón y desaparece de la carta de
+  todas las mesas al instante.
+- **Urgente** sube el ticket al tope de su estación.
 
-Requisitos: **Node ≥ 22.18** y `@qvac/sdk` instalado.
-`poppler` es opcional — si `pdftoppm` está en el PATH, el script lo usa y es más
-rápido y más liviano de memoria.
+### La carta es por plato, con foto
 
----
+Cada producto tiene imagen, descripción, etiquetas de dieta, estación y sus
+opciones de personalización: el punto de la carne, sacar la cebolla, la
+limonada sin hielo y en jarra. **Todo eso llega escrito a la cocina**, que es el
+punto: el mozo no vuelve a la mesa a preguntar.
 
-## Qué hay en el repo
+**Las fotos no hacen falta para que se vea bien.** Si el archivo no está, la
+interfaz dibuja un placeholder generado a partir del nombre del plato. No se
+descarga nada de internet y no hay recuadros rotos.
 
-```
-docs/
-  00-decision.md              decisión de track e idea, alcance, plan de 17 horas
-  01-como-corre-el-ocr.md     manual del script de ingesta
-  contexto/                   los documentos previos, conservados
-muestras/
-  Menu.pdf                    la carta real de Tienda de Café (Buenos Aires)
-scripts/
-  menu-ocr.js                 PDF/foto → menu.json     ← el ingestor
-  lib/estructura.js           todo lo que pasa DESPUÉS del OCR (sin QVAC)
-  prueba-estructura.js        37 tests de esa lógica    ← corren sin modelo
-  batch-ocr.js                el OCR de tickets, conservado
-```
+Y el filtro de dieta está arriba de todo y no escondido en un menú: **un celíaco
+no tiene que preguntarle a nadie.**
 
----
+### El pago muestra el detalle antes de mover un centavo
 
-## La carta de muestra, y por qué es difícil
+No es un adorno. Verificado leyendo el código de `@tetherto/wdk-cli@1.0.0-beta.2`
+(ver `Onaai/Hackaton-2026`), la herramienta `send_token` del MCP de WDK tiene un
+parámetro `dryRun` cuya descripción dice textualmente que hay que llamar primero
+con `dryRun=true`, mostrarle la vista previa a la persona, y recién después
+confirmar.
 
-`muestras/Menu.pdf` es la carta real de un local de Buenos Aires. Verificado con
-poppler:
+`WalletLedger.transfer` tiene **el mismo parámetro con el mismo significado**, y
+con `dryRun: true` la respuesta viene sin cobro registrado — o sea que saltearse
+la confirmación no cobra, y lo garantiza el tipo, no una frase amable.
 
-```
-Pages:            1
-Page size:        619.68 x 6958.08 pts    ← una sola página, altísima
-Fuentes:          ninguna                 ← no hay capa de texto
-Texto extraíble:  1 byte
-Imagen:           1 JPEG de 1291 x 14496 px
-```
+La comisión es 0,5% **cobrada en el mismo USDT que se envía**: es el argumento
+de los módulos *gasless* de WDK, y significa que alguien que nunca tocó cripto
+paga la cena sin comprar nada antes.
 
-**Es una foto de 14.496 píxeles de alto, sin una sola letra seleccionable, a dos
-columnas, con texto blanco sobre fotos y los símbolos de dieta como íconos.** No
-es un PDF limpio elegido a mano: es lo que un local tiene de verdad.
-
-Y **no trae precios** — ninguno. Por eso el OCR extrae la *estructura* y el local
-carga los precios una vez en `menu-precios.csv`. Lo que cuesta un día de trabajo
-es tipear 80 platos con sus descripciones, no poner 80 números.
+> ⚠️ **No hay pagos reales.** Es un libro contable en memoria: sin blockchain,
+> sin claves, sin frase semilla. Está escrito con la forma del MCP de WDK para
+> que reemplazarlo sea cambiar el adaptador y nada más.
 
 ---
 
-## Lo que el sistema no afirma
+## El repo
 
-Los íconos de vegano, vegetariano y sin TACC de la carta **son símbolos, no
-letras**: un reconocedor de alfabeto latino no los lee. El sistema solo marca una
-dieta cuando está **escrita con palabras**, y en todos los demás casos deja
-`dietaVerificada: false`.
+```
+app/                       la aplicación
+  src/domain/              modelo y reglas. No sabe de HTTP ni de almacenamiento
+  src/application/         casos de uso + los puertos (WalletLedger, MenuCatalog…)
+  src/infrastructure/      los adaptadores en memoria
+  src/config/              carta, billeteras de la demo, cotización
+  src/api/                 HTTP y servidor de archivos
+  public/                  las tres pantallas. Sin framework, sin build
+  tests/                   25 tests, corren con node:test
 
-No lo escondemos: lo mostramos en pantalla. **Acá el costo de equivocarse es que
-un celíaco coma gluten**, y un sistema que dice "no lo pude verificar" es mejor
-que uno que afirma.
+scripts/                   ingesta de cartas con OCR (fuera del camino principal)
+muestras/Menu.pdf          la carta real de Tienda de Café
+docs/                      decisión de track, manual del OCR, cómo correrlo
+docs/contexto/             los documentos de trabajo previos, enteros
+```
+
+La arquitectura sale del motor de
+[`Pipeballes/hackatonfeli2`](https://github.com/Pipeballes/hackatonfeli2) —
+mismo dominio, mismos puertos, mismo `DomainError`, misma convención de
+centavos, mismo `tsconfig` estricto. Lo que se agregó: la interfaz (que ese
+README listaba como *PROPUESTO*), la cocina por estación con estado por línea,
+las opciones de personalización, y las billeteras.
+
+---
+
+## Probado
+
+```
+$ cd app && npm test
+# tests 25 · pass 25 · fail 0
+```
+
+Además del suite, el flujo completo está recorrido contra el servidor con
+`curl`: pedido con opciones → partido por estación → despacho → cuenta →
+vista previa → pago → la caja pasa de 0 a 37,84 USDT → mesa cerrada. El detalle
+de qué se verificó y **qué no** está en
+[`docs/02-como-correrlo.md`](docs/02-como-correrlo.md), secciones 9 y 10.
+
+Lo principal que **no** está probado: no abrí las pantallas en un navegador
+—esta máquina no tiene interfaz gráfica—, así que la lógica está verificada por
+HTTP pero el HTML y el CSS no los vi renderizados.

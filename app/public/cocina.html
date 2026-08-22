@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesa Abierta · Cocina</title>
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <main>
+    <div class="fila" style="align-items:flex-start">
+      <div>
+        <h1>Cocina</h1>
+        <p class="sub">Cada estación despacha por su cuenta. Primero lo urgente, después lo más viejo.</p>
+      </div>
+      <label class="chip" style="margin-left:auto"><input type="checkbox" id="chk-auto" checked> Actualizar solo</label>
+      <button class="chico" id="btn-stock">Sin stock…</button>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+    <div class="estaciones" id="estaciones"></div>
+  </main>
+
+  <dialog id="dlg-stock">
+    <div class="contenido">
+      <h3 style="font-size:17px">Marcar sin stock</h3>
+      <p class="sub">Lo que apagues acá desaparece de la carta de todas las mesas al instante.</p>
+      <div id="lista-stock"></div>
+    </div>
+    <div class="pie"><button id="cerrar-stock">Cerrar</button></div>
+  </dialog>
+
+  <script type="module" src="cocina.js"></script>
+</body>
+</html>

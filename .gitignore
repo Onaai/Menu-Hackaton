@@ -1,5 +1,7 @@
 node_modules/
+dist/
 salida-menu/
+package-lock.json
 ocr-evidencia-*.json
 ocr-evidencia-*.csv
 *.log
