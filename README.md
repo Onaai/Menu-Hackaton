@@ -3,130 +3,215 @@
 **Aleph Hackathon · agosto 2026**
 
 Pedidos por QR para restaurantes. Cada persona de la mesa ve la carta en su
-teléfono, arma su pedido con las opciones que quiera, y la cocina lo recibe
-partido por estación. Al final se paga junto o por separado, desde una
-billetera, y la plata llega a la caja del local.
+teléfono, arma su pedido con las opciones que quiera, y la cocina lo recibe como
+un ticket por mesa con cronómetro. Al final cada uno paga con lo que le venga:
+**billetera USD₮ (WDK), Mercado Pago o efectivo con vuelto.**
 
-```bat
+```bash
 cd app
 npm install
 npm run dev
 ```
 
-→ **[`docs/02-como-correrlo.md`](docs/02-como-correrlo.md)** tiene el paso a
-paso completo, incluido cómo bajarlo a `C:\hack` y el recorrido de la demo.
-
----
-
-## Las tres pantallas
-
-| | |
+| Pantalla | Quién la usa |
 |---|---|
-| **`/`** · Carta | Lo que ve el comensal. Platos con foto, filtro de dieta, personalización, carrito, cuenta y pago |
-| **`/cocina.html`** · Cocina | El tablero de la cocina. Por estación, con demora, urgencias y sin stock |
-| **`/billeteras.html`** · Billeteras | Los saldos y los movimientos. Se ve llegar la plata a la caja |
+| `http://localhost:3000/` | El comensal. Escanea el QR y entra |
+| `http://localhost:3000/cocina.html` | La cocina |
+| `http://localhost:3000/billeteras.html` | La caja |
+| `http://localhost:3000/admin.html` | El encargado |
 
-Abrilas en tres pestañas y dejalas: se actualizan solas, así que lo que hacés en
-una aparece en las otras. Eso es la demo.
-
----
-
-## Lo que hace, y por qué está hecho así
-
-### La cocina no es una lista de pedidos
-
-- **Se parte por estación.** La barra arranca la limonada mientras la parrilla
-  hace la burger. Ninguna espera a la otra. Sin esto, una cocina real no usa el
-  sistema.
-- **El estado va por línea, no por comanda.** Un plato puede estar listo y otro
-  del mismo pedido todavía no. El estado de la comanda **se deduce** de sus
-  líneas — nunca se guardan los dos por separado, porque tarde o temprano dirían
-  cosas distintas y la mesa vería "listo" mientras la cocina ve "pendiente".
-- **La demora la cuenta el servidor**, no el navegador, así que dos pantallas de
-  cocina muestran siempre lo mismo. Verde hasta 5 minutos, ámbar hasta 10, rojo
-  después.
-- **Se puede deshacer.** En una cocina real alguien toca el botón de más.
-- **Se puede cancelar un plato**, y entonces no se cobra.
-- **Sin stock en un toque**: se acabó el salmón y desaparece de la carta de
-  todas las mesas al instante.
-- **Urgente** sube el ticket al tope de su estación.
-
-### La carta es por plato, con foto
-
-Cada producto tiene imagen, descripción, etiquetas de dieta, estación y sus
-opciones de personalización: el punto de la carne, sacar la cebolla, la
-limonada sin hielo y en jarra. **Todo eso llega escrito a la cocina**, que es el
-punto: el mozo no vuelve a la mesa a preguntar.
-
-**Las fotos no hacen falta para que se vea bien.** Si el archivo no está, la
-interfaz dibuja un placeholder generado a partir del nombre del plato. No se
-descarga nada de internet y no hay recuadros rotos.
-
-Y el filtro de dieta está arriba de todo y no escondido en un menú: **un celíaco
-no tiene que preguntarle a nadie.**
-
-### El pago muestra el detalle antes de mover un centavo
-
-No es un adorno. Verificado leyendo el código de `@tetherto/wdk-cli@1.0.0-beta.2`
-(ver `Onaai/Hackaton-2026`), la herramienta `send_token` del MCP de WDK tiene un
-parámetro `dryRun` cuya descripción dice textualmente que hay que llamar primero
-con `dryRun=true`, mostrarle la vista previa a la persona, y recién después
-confirmar.
-
-`WalletLedger.transfer` tiene **el mismo parámetro con el mismo significado**, y
-con `dryRun: true` la respuesta viene sin cobro registrado — o sea que saltearse
-la confirmación no cobra, y lo garantiza el tipo, no una frase amable.
-
-La comisión es 0,5% **cobrada en el mismo USDT que se envía**: es el argumento
-de los módulos *gasless* de WDK, y significa que alguien que nunca tocó cripto
-paga la cena sin comprar nada antes.
-
-> ⚠️ **No hay pagos reales.** Es un libro contable en memoria: sin blockchain,
-> sin claves, sin frase semilla. Está escrito con la forma del MCP de WDK para
-> que reemplazarlo sea cambiar el adaptador y nada más.
+Node ≥ 22.18. Sin variables de entorno arranca completo: ver `app/.env.example`
+para conectar un nodo EVM, credenciales de Google o el servidor de QVAC.
 
 ---
 
-## El repo
+## Integración con WDK — dónde mirar
+
+Paquetes instalados:
 
 ```
-app/                       la aplicación
-  src/domain/              modelo y reglas. No sabe de HTTP ni de almacenamiento
-  src/application/         casos de uso + los puertos (WalletLedger, MenuCatalog…)
-  src/infrastructure/      los adaptadores en memoria
-  src/config/              carta, billeteras de la demo, cotización
-  src/api/                 HTTP y servidor de archivos
-  public/                  las tres pantallas. Sin framework, sin build
-  tests/                   25 tests, corren con node:test
-
-scripts/                   ingesta de cartas con OCR (fuera del camino principal)
-muestras/Menu.pdf          la carta real de Tienda de Café
-docs/                      decisión de track, manual del OCR, cómo correrlo
-docs/contexto/             los documentos de trabajo previos, enteros
+@tetherto/wdk@1.0.0-beta.16
+@tetherto/wdk-wallet-evm@1.0.0-beta.11
 ```
 
-La arquitectura sale del motor de
-[`Pipeballes/hackatonfeli2`](https://github.com/Pipeballes/hackatonfeli2) —
-mismo dominio, mismos puertos, mismo `DomainError`, misma convención de
-centavos, mismo `tsconfig` estricto. Lo que se agregó: la interfaz (que ese
-README listaba como *PROPUESTO*), la cocina por estación con estado por línea,
-las opciones de personalización, y las billeteras.
+Todo vive en un archivo: **[`app/src/infrastructure/wallet-wdk.ts`](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts)**
+
+| Qué | Permalink |
+|---|---|
+| Semilla BIP-39 real | [línea 84](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L84) |
+| `registerWallet` + `registerPolicy` | [líneas 96-97](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L96-L97) |
+| **Las políticas** | [líneas 112-178](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L112-L178) |
+| Derivación BIP-44 de cada cuenta | [línea 226](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L226) |
+| `quoteTransfer` (vista previa) | [línea 311](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L311) |
+| `transfer` (envío) | [línea 320](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L320) |
+| `PolicyViolationError` → 409 | [línea 379](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/wallet-wdk.ts#L379) |
+
+### Qué hace WDK acá
+
+**Autoriza cada cobro.** No es una capa de conveniencia sobre una llamada: el
+motor de políticas de WDK envuelve la cuenta en un Proxy y evalúa tres reglas
+antes de que la transferencia toque la red.
+
+```
+solo-a-la-caja       el destinatario tiene que ser la billetera del local
+tope-por-operacion   máximo 150,00 USDT por pago
+tope-diario          máximo 500,00 USDT por día y por cuenta
+permitir-el-resto    permiso explícito — WDK deniega por defecto
+```
+
+Un pago que viola una regla no ocurre:
+
+```
+POST /api/tables/:id/payments   { metodo: "WALLET", ... }
+409 {"code":"CONFLICT","message":"WDK bloqueó el pago — Supera el tope por operación (150.00 USDT)"}
+```
+
+`GET /api/wdk` devuelve el estado completo —paquete, cadena, reglas activas,
+cuentas con su derivación y el gasto del día contra el tope— y la pantalla de
+billeteras lo muestra arriba de todo.
+
+### ⚠️ Qué es real y qué no
+
+| | Sin `EVM_RPC_URL` | Con `EVM_RPC_URL` |
+|---|---|---|
+| Semilla BIP-39 | ✅ real | ✅ real |
+| Direcciones BIP-44 | ✅ derivadas por WDK | ✅ derivadas por WDK |
+| Motor de políticas | ✅ evalúa y bloquea | ✅ evalúa y bloquea |
+| Comisión | estimada | ✅ `quoteTransfer` |
+| Transacción | ❌ **el saldo se asienta en memoria** | ✅ `transfer` a la red |
+
+**Sin nodo no se manda nada a ninguna cadena.** La derivación y las políticas sí
+son reales, porque son locales. Cada movimiento lo declara con `motor: "wdk"` y
+`onchain: false`, y se ve en la interfaz y en el log de la terminal. Poner
+`EVM_RPC_URL` es lo único que cambia, sin tocar código.
+
+> Red del demo: `sepolia`. Token: configurable con `WDK_TOKEN_ADDRESS` (6
+> decimales por defecto). **No se desplegó ningún contrato**: el default es la
+> dirección cero, porque sin RPC no se consulta.
+
+### Un detalle que costó encontrar
+
+WDK **deniega por defecto**. Si una operación está gobernada por una política y
+ninguna regla la matchea, tira `governed-but-unmatched` y el pago se cae. Hace
+falta una regla `ALLOW` explícita al final — y como dentro del mismo alcance
+`DENY` le gana a `ALLOW`, esa regla no destapa nada de lo bloqueado arriba.
+
+---
+
+## Integración con QVAC — dónde mirar
+
+Sugerencias personalizadas a partir de lo que la persona ya pidió, con el modelo
+corriendo **en la máquina del local**.
+
+| Qué | Permalink |
+|---|---|
+| Llamada al modelo | [`recomendador-qvac.ts` L79](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/recomendador-qvac.ts#L79) |
+| Extracción tolerante del JSON | [`recomendador-qvac.ts` L156](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/infrastructure/recomendador-qvac.ts#L156) |
+| **La validación** | [`sugerencias-service.ts` L83](https://github.com/Onaai/Menu-Hackaton/blob/9015345330255ad07252e9a7426513780452f4d3/app/src/application/sugerencias-service.ts#L83) |
+
+Se conecta por el **servidor compatible con OpenAI de QVAC**, que la consigna
+permite de forma explícita:
+
+```bash
+qvac serve openai --preload <modelo>     # levantarlo ANTES de npm run dev
+```
+
+> Si arranca sin `--preload` dice *"No models configured for preload"* y no
+> responde. Ahí la app cae al plan B y **la pantalla dice "sin IA"** — un plan B
+> disfrazado de IA sería mentir.
+
+### El mérito no es llamar al modelo
+
+Son diez líneas. Lo difícil es que un modelo de 1–4B **inventa**. Nada de lo que
+dice llega al cliente sin verificarse contra la carta real:
+
+| Chequeo | Qué atrapa |
+|---|---|
+| formato | prosa donde se pidió JSON |
+| existe en la carta | **el plato inventado** |
+| hay stock | algo que la cocina apagó hace cinco minutos |
+| cumple la dieta | 🔴 **una tostada común a un celíaco** |
+| no repetida | el mismo plato dos veces |
+
+Y lo descartado **se muestra en pantalla con el motivo**. Ejemplo real de una
+corrida, con la cuenta marcada sin gluten:
+
+```
+· Limonada de menta: Lo pedís seguido.
+· Pesca del día: Va con lo que solés pedir de principales.
+descartadas: [{ texto: "Burger de la casa", razon: "rompe-la-dieta" }]
+```
+
+El motor propuso la burger; la validación la frenó. **El costo de ese error no
+es una recomendación fea, es que un celíaco coma gluten.**
+
+### Modelo y hardware — completar con su corrida
+
+```
+Modelo:        (el que carguen con --preload)
+Cuantización:  (Q4_K_M, etc.)
+Máquina:       Windows 11 · 31 GB RAM · AMD Radeon 880M (Vulkan)
+Inferencia:    CPU
+Latencia:      la que devuelve `latenciaMs` en GET /api/sugerencias
+```
+
+`latenciaMs` viaja en la respuesta justamente para que ese número sea medido y
+no estimado.
+
+---
+
+## Lo demás
+
+**Cocina.** Un ticket por mesa —no por estación— con cronómetro que arranca en
+el pedido pendiente más viejo. Lo cuenta el servidor y el navegador solo lo hace
+correr, así que dos pantallas nunca muestran distinto. Se entrega tildando, o
+toda la mesa de una. Marcar sin stock saca el plato de la carta al instante.
+
+**Pagos.** Tres métodos, cada comensal el suyo o uno paga la mesa. Efectivo
+calcula el vuelto. El corte de caja separa por método y dice **cuánto tiene que
+haber en el cajón**: lo cobrado en efectivo, no lo recibido.
+
+**Cuentas.** Cuenta anónima automática por cookie — nadie se registra para pedir
+de comer. Registrarse **asciende** la cuenta anónima en el lugar, así el
+historial que junta el modelo no se pierde. Google tiene el flujo OAuth 2.0 +
+PKCE implementado y se activa con `GOOGLE_CLIENT_ID`; sin credenciales corre un
+modo demo etiquetado en pantalla. **Apple corre siempre en demo**: "Sign in with
+Apple" exige una cuenta de desarrollador paga.
+
+**Administración.** El encargado edita los datos del local y la carta en vivo:
+precio, categoría, minutos de preparación, stock, alta y baja.
 
 ---
 
 ## Probado
 
-```
-$ cd app && npm test
-# tests 25 · pass 25 · fail 0
+```bash
+cd app && npm test
+# tests 64 · pass 64 · fail 0
 ```
 
-Además del suite, el flujo completo está recorrido contra el servidor con
-`curl`: pedido con opciones → partido por estación → despacho → cuenta →
-vista previa → pago → la caja pasa de 0 a 37,84 USDT → mesa cerrada. El detalle
-de qué se verificó y **qué no** está en
-[`docs/02-como-correrlo.md`](docs/02-como-correrlo.md), secciones 9 y 10.
+Verificado también por HTTP contra el servidor: pedido con opciones → ticket de
+cocina con cronómetro → entrega → cuenta → los tres métodos de pago → corte de
+caja cuadrado → bloqueo por política de WDK.
 
-Lo principal que **no** está probado: no abrí las pantallas en un navegador
-—esta máquina no tiene interfaz gráfica—, así que la lógica está verificada por
-HTTP pero el HTML y el CSS no los vi renderizados.
+**Lo que no está probado:** las pantallas no se abrieron en un navegador (se
+desarrollaron en una máquina sin interfaz gráfica), y el flujo OAuth real de
+Google nunca se ejecutó por falta de credenciales.
+
+## El repo
+
+```
+app/src/domain/          modelo y reglas. No sabe de HTTP ni de almacenamiento
+app/src/application/     casos de uso + puertos (WalletLedger, Recomendador…)
+app/src/infrastructure/  adaptadores: WDK, QVAC, memoria, consola
+app/src/api/             HTTP, cookies, OAuth, archivos estáticos
+app/public/              las cuatro pantallas. Sin framework, sin build
+app/tests/               64 tests con node:test
+scripts/                 ingesta de cartas con OCR (fuera del camino principal)
+docs/                    decisiones de track y manual de uso
+```
+
+La arquitectura sale del motor de
+[`Pipeballes/hackatonfeli2`](https://github.com/Pipeballes/hackatonfeli2) —
+mismo dominio, mismos puertos, misma convención de centavos, mismo `tsconfig`
+estricto.
