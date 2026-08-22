@@ -103,6 +103,7 @@ const server = createServer(createApiHandler({
   wdk: usaWdk
     ? { activo: true, onchain: (ledgerBase as WdkWalletLedger).onchain, paquete: "@tetherto/wdk" }
     : { activo: false, onchain: false },
+  ...(usaWdk ? { estadoWdk: () => (ledgerBase as WdkWalletLedger).estado() } : {}),
 }));
 
 server.listen(port, () => {
@@ -134,10 +135,16 @@ server.listen(port, () => {
   console.log("");
   console.log(`  Cotización        1 USDT = $${ARS_PER_USDT.toLocaleString("es-AR")}`);
   console.log("");
-  imprimirBilleteras(semilla.todas, RED, TOKEN);
+  imprimirBilleteras(semilla.todas, RED, TOKEN, !usaWdk ? "simulado" : wdkLedger?.onchain ? "wdk-onchain" : "wdk");
   console.log(`  Mesa ${semilla.mesa.tableNumber} abierta · ${semilla.mesa.id}`);
   console.log("");
-  console.log(`  ${mal("Pagos SIMULADOS")} ${gris("· libro contable en memoria · no hay blockchain ni claves")}`);
+  if (usaWdk && !wdkLedger?.onchain) {
+    console.log(`  ${ok("WDK autoriza cada cobro")} ${gris("· direcciones reales · SIN RED: el saldo se asienta en memoria")}`);
+  } else if (usaWdk) {
+    console.log(`  ${ok("WDK on-chain")} ${gris("· las transacciones se mandan a la red de verdad")}`);
+  } else {
+    console.log(`  ${mal("Pagos SIMULADOS")} ${gris("· libro contable en memoria")}`);
+  }
   console.log(`  ${gris("Todo se borra al cortar el servidor.")}`);
   console.log("");
 });

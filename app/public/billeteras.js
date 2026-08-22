@@ -8,17 +8,69 @@ let billeteras = [];
 let arsPerUsdt = 1480;
 const saldosPrevios = new Map();
 
+let wdk = null;
+
 async function cargar() {
-  const [w, movs, config] = await Promise.all([
+  const [w, movs, config, estadoWdk] = await Promise.all([
     api("/api/wallets"),
     api("/api/wallets/transfers"),
     api("/api/config"),
+    api("/api/wdk").catch(() => null),
   ]);
   billeteras = w.wallets;
   arsPerUsdt = config.arsPerUsdt;
+  wdk = estadoWdk;
+  pintarWdk();
   pintarBilleteras();
   pintarSelectores();
   pintarMovimientos(movs.transfers);
+}
+
+/**
+ * Estado de WDK.
+ *
+ * Está arriba de todo y no escondido porque es la evidencia de la
+ * integración: qué paquete, qué reglas están activas, y cuánto lleva gastado
+ * cada cuenta contra el tope diario. En el video, esta tarjeta es la que
+ * respalda la frase "las políticas de WDK autorizan cada cobro".
+ */
+function pintarWdk() {
+  const cont = $("wdk");
+  if (!cont) return;
+  if (!wdk?.activo) {
+    return cont.replaceChildren(el("div", { class: "panel" },
+      el("b", {}, "Billetera simulada"),
+      el("div", { class: "sub", style: "margin:4px 0 0" }, "WDK_MODE=simulado. Sin derivación ni políticas.")));
+  }
+
+  cont.replaceChildren(el("div", { class: "panel wdk-panel" },
+    el("div", { class: "fila" },
+      el("b", {}, `🔐 ${wdk.paquete}`),
+      el("span", { class: "chip dieta" }, wdk.onchain ? `on-chain · ${wdk.chain}` : `${wdk.chain} · firma y política local`),
+      el("span", { class: "chip", style: "margin-left:auto" }, `token ${wdk.tokenAddress.slice(0, 10)}… · ${wdk.tokenDecimals} dec`)),
+
+    el("div", { class: "sub", style: "margin:12px 0 6px" }, "Políticas activas — evaluadas antes de mover un centavo"),
+    el("div", { class: "politicas" }, ...wdk.politicas.map((p) =>
+      el("div", { class: `politica ${p.nombre === "permitir-el-resto" ? "allow" : "deny"}` },
+        el("code", {}, p.nombre),
+        el("span", {}, p.detalle)))),
+
+    el("div", { class: "sub", style: "margin:14px 0 6px" }, "Cuentas derivadas (BIP-44) y gasto del día"),
+    el("table", { class: "movimientos" },
+      el("thead", {}, el("tr", {},
+        ...["Cuenta", "Derivación", "Dirección", "Gastado hoy"].map((h) => el("th", {}, h)))),
+      el("tbody", {}, ...wdk.cuentas.map((c) => {
+        const pct = Math.min(100, (c.gastadoHoyInCents / wdk.topeDiarioInCents) * 100);
+        return el("tr", {},
+          el("td", {}, c.label),
+          el("td", { class: "mono" }, c.path),
+          el("td", { class: "mono" }, `${c.address.slice(0, 12)}…${c.address.slice(-6)}`),
+          el("td", {},
+            el("div", { class: "fila", style: "gap:6px" },
+              el("span", { class: "mono" }, `${usdt(c.gastadoHoyInCents)} / ${usdt(wdk.topeDiarioInCents)}`)),
+            el("div", { class: "barra" }, el("i", { style: `width:${pct}%` }))));
+      }))),
+  ));
 }
 
 function pintarBilleteras() {

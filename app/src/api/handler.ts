@@ -30,6 +30,8 @@ export interface Dependencias {
   token: string;
   restaurante: Restaurante;
   wdk: { activo: boolean; onchain: boolean; paquete?: string };
+  /** Estado detallado de WDK para la pantalla de billeteras. */
+  estadoWdk?: () => unknown;
 }
 
 export function createApiHandler(deps: Dependencias) {
@@ -212,6 +214,11 @@ export function createApiHandler(deps: Dependencias) {
           if (!orderStatuses.has(body.status)) throw new DomainError("VALIDATION_ERROR", "El estado de comanda no es válido.");
           return json(response, 200, await service.updateOrderStatus(orderId, body.status));
         }
+      }
+
+      // ── WDK: evidencia de la integración ────────────────────────────────
+      if (method === "GET" && url.pathname === "/api/wdk") {
+        return json(response, 200, deps.estadoWdk ? deps.estadoWdk() : { activo: false, onchain: false });
       }
 
       // ── Billeteras ──────────────────────────────────────────────────────

@@ -176,6 +176,36 @@ export class WdkWalletLedger implements WalletLedger {
     }];
   }
 
+  /**
+   * Lo que hay que poder mostrar en pantalla y en el video: qué paquete, qué
+   * cadena, qué reglas están activas y cuánto lleva gastado cada cuenta contra
+   * el tope diario. Sin esto, "usamos WDK" es una afirmación sin evidencia.
+   */
+  estado() {
+    return {
+      activo: true,
+      paquete: "@tetherto/wdk",
+      chain: this.config.chain,
+      onchain: this.onchain,
+      tokenAddress: this.config.tokenAddress,
+      tokenDecimals: this.config.tokenDecimals,
+      politicas: [
+        { nombre: "solo-a-la-caja", detalle: "El destinatario tiene que ser la billetera del local" },
+        { nombre: "tope-por-operacion", detalle: `Máximo ${(this.config.topePorOperacionInCents / 100).toFixed(2)} USDT por pago` },
+        { nombre: "tope-diario", detalle: `Máximo ${(this.config.topeDiarioInCents / 100).toFixed(2)} USDT por día y por cuenta` },
+        { nombre: "permitir-el-resto", detalle: "Permiso explícito: WDK deniega por defecto" },
+      ],
+      cuentas: [...this.cuentas.values()].map((c) => ({
+        label: c.wallet.label,
+        path: c.account.path,
+        address: c.wallet.address,
+        gastadoHoyInCents: this.gastadoHoy.get(c.account.path) ?? 0,
+      })),
+      topePorOperacionInCents: this.config.topePorOperacionInCents,
+      topeDiarioInCents: this.config.topeDiarioInCents,
+    };
+  }
+
   private idCaja(): string {
     for (const [id, c] of this.cuentas) if (c.wallet.kind === "BUSINESS") return id;
     return "";

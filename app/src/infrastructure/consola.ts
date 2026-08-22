@@ -117,10 +117,24 @@ function comandoWdk(ctx: ContextoPago): string {
   return `wdk send --network ${ctx.red} --token ${ctx.token} --to ${ctx.destino.address} --amount ${monto}${dry} --json`;
 }
 
-/** Cabecera de la sesión de billeteras al arrancar. */
-export function imprimirBilleteras(wallets: Wallet[], red: string, token: string): void {
+/**
+ * Cabecera de la sesión de billeteras al arrancar.
+ *
+ * La etiqueta no es decorativa: hay tres estados distintos y confundirlos sería
+ * mentir en el video.
+ *
+ *   simulado          → direcciones inventadas, sin WDK.
+ *   WDK sin red       → direcciones derivadas de verdad y políticas de WDK
+ *                       autorizando, pero el saldo se asienta en memoria.
+ *   WDK on-chain      → la transacción se manda a la red.
+ */
+export function imprimirBilleteras(wallets: Wallet[], red: string, token: string, modo: "simulado" | "wdk" | "wdk-onchain" = "simulado"): void {
+  const etiqueta =
+    modo === "wdk-onchain" ? c.verde("WDK · ON-CHAIN")
+    : modo === "wdk" ? c.verde("WDK · derivadas BIP-44") + c.gris("  saldo en memoria (sin RPC)")
+    : c.ambar("SIMULADAS");
   console.log(linea("━"));
-  console.log(`  ${c.fuerte("BILLETERAS")}   ${c.ambar("SIMULADAS")}   ${c.gris(`red ${red} · token ${token}`)}`);
+  console.log(`  ${c.fuerte("BILLETERAS")}   ${etiqueta}   ${c.gris(`red ${red} · token ${token}`)}`);
   console.log(linea("━"));
   for (const w of wallets) {
     const tipo = w.kind === "BUSINESS" ? c.verde("negocio") : c.gris("cliente");

@@ -10,10 +10,12 @@
   <main>
     <h1>Billeteras</h1>
     <p class="sub">
-      Libro contable en memoria. No hay blockchain, no hay claves ni frase semilla, no se mueve
-      un centavo real. La forma es la del MCP de WDK a propósito: <code>get_address</code>,
-      <code>get_balance</code> y <code>send_token</code> con <code>dryRun</code>.
+      Las direcciones las deriva WDK de una semilla BIP-39 y el motor de políticas de WDK
+      autoriza cada cobro. Sin <code>EVM_RPC_URL</code> no se manda nada a una red: el saldo
+      se asienta en memoria, y cada movimiento lo declara.
     </p>
+
+    <div id="wdk" style="margin-bottom:20px"></div>
 
     <div class="billeteras" id="billeteras"></div>
 
