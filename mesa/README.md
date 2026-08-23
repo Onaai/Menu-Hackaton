@@ -223,7 +223,39 @@ no puede evitarlo: lo ataja el validador, y de ahí salen los 7 descartes.
 node scripts/confiabilidad-agente.mjs QWEN3_4B_INST_Q4_K_M 10
 ```
 
-<!-- TABLA_AGENTE -->
+```
+caso                              uso la herr.  uso el dato   termino   no invento   pasos   mediana
+cuanto hay en la caja             100%          100%          100%      100%         2.8     29569 ms
+direccion de la caja              100%          100%          100%      100%         2.0     22267 ms
+cobro dentro del tope             100%          100%          100%      100%         4.7     57458 ms
+cobro por encima del tope         100%          100%          100%      100%         2.4     23824 ms
+destinatario fuera de la allowlist100%          100%          100%      100%         2.5     25460 ms
+TOTAL                             100%          100%          100%      100%         2.9     27787 ms
+```
+
+**50 de 50 en las cuatro columnas**, pero el número que importa contar es otro:
+esa tabla dio `82% / 98% / 94% / 86%` la primera vez, y el caso "cobro dentro
+del tope" daba **10%**. Lo que la llevó a 100% fueron tres arreglos que
+aparecieron midiendo, no leyendo el código:
+
+**El campo opcional en la gramática.** `wallet` estaba en el esquema pero no en
+`required`, así que el modelo emitía `{"accion":"ver_saldo"}` sin decir de cuál
+billetera — con decodificación restringida siempre toma el camino más corto que
+la gramática permite. La herramienta nunca se llegaba a llamar. Adivinar el
+argumento desde el código era la otra salida y se descartó: en algo que toca
+plata, *"seguro quiso decir la caja"* es la suposición que no se hace.
+
+**El bucle.** El modelo llamaba a `ver_saldo` y volvía a llamarlo tres veces
+más, quemaba las cinco vueltas y terminaba *describiendo* el cobro en vez de
+hacerlo. Devolverle el dato memorizado no alcanzó: seguía eligiendo lo mismo. Lo
+que lo destrabó fue **sacarle la herramienta del enum** — el mismo mecanismo que
+usa todo el resto del diseño. Si no puede emitir el token, no hay bucle posible.
+
+**La afirmación falsa.** Con la vista previa recién preparada, contestaba *"Cobro
+de 12 USDT realizado con éxito"*. Es mentira: se creó un dry-run. Pedírselo en el
+prompt es una promesa del modelo sobre su propia salida, así que ahora **la
+aclaración la agrega el código** y el modelo no puede contradecirla. La última
+palabra sobre si la plata se movió no la tiene el modelo.
 
 Las herramientas de este arnés son deterministas **a propósito**: lo que se mide
 es el modelo, no WDK CLI. El saldo de prueba es `37.42`, un número que no
@@ -257,7 +289,7 @@ número de este README está estimado.
 
 ```bash
 npm run typecheck && npm test
-# tests 49 · pass 49 · fail 0
+# tests 76 · pass 76 · fail 0
 ```
 
 Verificado además a mano: el asistente respondiendo consultas libres por HTTP
@@ -302,7 +334,7 @@ src/application/     casos de uso · el agente y sus políticas
 src/infrastructure/  WDK CLI, políticas WDK, QVAC SDK, memoria
 src/api/             HTTP
 web/                 React + Vite: comensal y cocina/caja
-tests/               49 tests con node:test
+tests/               76 tests con node:test
 scripts/             setup de wallets y los dos arneses de confiabilidad
 ```
 
