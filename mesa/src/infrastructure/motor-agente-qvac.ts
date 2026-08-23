@@ -104,8 +104,10 @@ export function esquemaDePaso(contexto: ContextoPaso): Record<string, unknown> {
 const SISTEMA = (contexto: ContextoPaso) => `Sos el asistente de caja de un restaurante. Operás la billetera del local con las herramientas que tenés, una por vez.
 
 HERRAMIENTAS
+- ver_caja(): el corte del día. Cuánto se cobró, por qué método, propinas y cuánto tiene que haber en el cajón.
+- ver_mesas(): qué mesas están abiertas, cuántos comensales hay y quién no pagó todavía.
 - ver_saldo(wallet): cuánto USDT tiene esa billetera. wallet: ${contexto.wallets.join(" | ")}
-- ver_direccion(wallet): la dirección pública de esa billetera.
+- ver_direccion(wallet): la dirección pública de esa billetera, para verificarla.
 - cotizar_cobro(montoUsdt, destinatario): prepara un cobro y devuelve la vista previa. NO cobra: la confirma una persona.
 - responder(respuesta): cuando ya sabés la respuesta, contestale al encargado.
 

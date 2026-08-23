@@ -83,15 +83,39 @@ export class AsistenteQvacSdk {
     if (this.cargando) return this.cargando;
 
     this.cargando = (async () => {
-      try {
+      // Dos intentos, no uno.
+      //
+      // Visto en una corrida real: el lock huerfano se borro bien y el worker
+      // IGUAL no arranco. No quedaba ningun proceso `bare` dando vueltas ni
+      // lock en disco, o sea que el estado estaba limpio y la falla fue
+      // transitoria — lo mas probable es que la tuberia IPC del worker anterior
+      // todavia estuviera ocupandose de morir.
+      //
+      // Un solo intento convierte ese medio segundo en "la IA no anda" durante
+      // toda la sesion, porque `this.fallo` se pega y no se vuelve a probar.
+      // Con un reintento se resuelve solo y nadie se entera.
+      const intentar = async () => {
         limpiarLockHuerfano();
-        this.modelId = await qvac.loadModel({
+        return qvac.loadModel({
           modelSrc: this.descriptor,
           modelConfig: { device: this.opciones.device, ctx_size: this.opciones.ctxSize },
           ...(onProgress
             ? { onProgress: (p: qvac.ModelProgressUpdate) => onProgress(p.percentage, p.downloaded, p.total) }
             : {}),
         });
+      };
+
+      try {
+        try {
+          this.modelId = await intentar();
+        } catch (primera) {
+          const mensaje = explicar(primera);
+          console.warn(`  QVAC: falló el primer intento (${mensaje}). Reintentando...`);
+          // Un respiro para que el worker viejo termine de soltar todo.
+          await new Promise((listo) => setTimeout(listo, 2_000));
+          this.modelId = await intentar();
+          console.log("  QVAC: el reintento funcionó.");
+        }
         return true;
       } catch (error) {
         this.fallo = explicar(error);

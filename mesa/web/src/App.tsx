@@ -413,7 +413,7 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
       <b>Checkout simulado</b>
       <span>No se ejecuta el binario <code>wdk</code> y no hay transacción on-chain. El recorrido —saldo, dry-run, confirmación, transferencia— es el mismo. Para el cobro real: sacar <code>WDK_CLI_MODE</code> y desbloquear las wallets.</span>
     </div>}
-    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{metodo === "WALLET" && receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
+    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
       ? <>
           <div className="dialog-actions">
             <button className="primary grande" disabled={busy || Boolean(receipt)} onClick={() => void pagarConBilletera()}>
@@ -480,7 +480,7 @@ function KitchenView({ navigate }: { navigate: (path: string) => void }) {
   useEffect(() => { void refresh(); void refreshMoney(); const timer = window.setInterval(() => { void refresh(); void refreshMoney(); }, 2500); return () => window.clearInterval(timer); }, [refresh, refreshMoney]);
   const visible = useMemo(() => orders.filter((order) => filter === "ACTIVE" ? order.status !== "DELIVERED" : order.status === filter), [orders, filter]);
   const advance = async (order: KitchenOrder) => { const next = nextStatus[order.status]; if (!next) return; try { await patch(`/api/kitchen/orders/${order.id}/status`, { status: next }); await refresh(); } catch (cause) { setError(messageOf(cause)); } };
-  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div><LlamadasPendientes llamadas={llamadas} onAtender={atenderLlamada} /><AgentePanel />{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}{financials?.porMetodo && <div className="corte-caja"><span className="corte-titulo">CORTE DE CAJA</span><div className="corte-grid"><div><b>Billetera</b><span>{financials.porMetodo.wallet.cantidad} · {money.format(financials.porMetodo.wallet.totalInCents / 100)}</span></div><div><b>Efectivo</b><span>{financials.porMetodo.efectivo.cantidad} · {money.format(financials.porMetodo.efectivo.totalInCents / 100)}</span></div><div><b>Mercado Pago</b><span>{financials.porMetodo.mercadoPago.cantidad} · {money.format(financials.porMetodo.mercadoPago.totalInCents / 100)}<em> demo</em></span></div><div className="cajon"><b>En el cajón</b><span>{money.format(financials.porMetodo.efectivo.enElCajon / 100)}</span></div></div><small>En el cajón va lo <b>cobrado</b> en efectivo, no lo recibido: entraron {money.format(financials.porMetodo.efectivo.recibidoInCents / 100)} y salieron {money.format(financials.porMetodo.efectivo.vueltoInCents / 100)} de vuelto.</small></div>}<div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><div className="ticket-tiempo"><Cronometro desde={order.createdAt} hasta={order.updatedAt} desfasaje={desfasaje} detenido={order.status === "DELIVERED"} /><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}</main>;
+  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div><LlamadasPendientes llamadas={llamadas} onAtender={atenderLlamada} /><div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><div className="ticket-tiempo"><Cronometro desde={order.createdAt} hasta={order.updatedAt} desfasaje={desfasaje} detenido={order.status === "DELIVERED"} /><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}{financials?.porMetodo && <div className="corte-caja"><span className="corte-titulo">CORTE DE CAJA</span><div className="corte-grid"><div><b>Billetera</b><span>{financials.porMetodo.wallet.cantidad} · {money.format(financials.porMetodo.wallet.totalInCents / 100)}</span></div><div><b>Efectivo</b><span>{financials.porMetodo.efectivo.cantidad} · {money.format(financials.porMetodo.efectivo.totalInCents / 100)}</span></div><div><b>Mercado Pago</b><span>{financials.porMetodo.mercadoPago.cantidad} · {money.format(financials.porMetodo.mercadoPago.totalInCents / 100)}<em> demo</em></span></div><div className="cajon"><b>En el cajón</b><span>{money.format(financials.porMetodo.efectivo.enElCajon / 100)}</span></div></div><small>En el cajón va lo <b>cobrado</b> en efectivo, no lo recibido: entraron {money.format(financials.porMetodo.efectivo.recibidoInCents / 100)} y salieron {money.format(financials.porMetodo.efectivo.vueltoInCents / 100)} de vuelto.</small></div>}<AgentePanel /></main>;
 }
 
 /**
@@ -526,29 +526,31 @@ function AgentePanel() {
         : <span className="badge reglas">modelo no cargado</span>}
     </div>
 
-    {estado?.politicas && <div className="agente-politicas">
-      <span>tope/operacion <b>{estado.politicas.topePorOperacion} USDT</b></span>
-      <span>tope/dia <b>{estado.politicas.topeDiario} USDT</b></span>
-      <span>usado hoy <b>{estado.gastadoHoy} USDT</b></span>
-      <span>solo a <b>{estado.politicas.destinatariosPermitidos.join(", ")}</b></span>
-    </div>}
-
-    {/* Es la pregunta que va a hacer cualquiera que mire esto: si el modelo se
-        vuelve loco, cuanto puede mover. La respuesta va en pantalla. */}
+    {/* Los topes y la allowlist NO se muestran como chips fijos.
+        Eran ruido: un encargado no necesita ver "tope/dia 100 USDT" todo el
+        tiempo, y encima se leia como si le estuviera limitando el consumo al
+        cliente, que no es lo que hacen. Siguen existiendo, se siguen
+        evaluando, y aparecen donde importan: en el paso de la traza que
+        bloquean, con el motivo. Evidencia en accion en vez de un cartel. */}
     <p className="agente-alcance">
-      El agente puede consultar saldos y <b>preparar</b> un cobro. No puede transmitirlo:
-      <code>wdk send</code> no esta entre sus acciones. La confirmacion la das vos.
+      Preguntas sobre la caja, las mesas y las billeteras. Puede <b>preparar</b> un
+      cobro pero no transmitirlo: <code>wdk send</code> no está entre sus acciones.
     </p>
 
     <form className="agente-ask" onSubmit={(e) => { e.preventDefault(); void preguntar(consulta); }}>
       <input value={consulta} maxLength={300} disabled={busy || !disponible}
-        placeholder="cuanto tenemos en la caja?"
+        placeholder="¿cuánto llevamos cobrado hoy?"
         onChange={(e) => setConsulta(e.target.value)} />
       <button className="primary" type="submit" disabled={busy || !disponible || !consulta.trim()}>Preguntar</button>
     </form>
 
     <div className="agente-sugeridas">
-      {["¿cuánto tenemos en la caja?", "¿cuál es la dirección del local?", "cobrale 12 USDT a la mesa", "cobrale 500 USDT a la mesa"].map((q) =>
+      {/* Preguntas de operacion, no de cobro.
+          Antes decian "cobrale 500 USDT a la mesa" y eso no lo pide nadie: para
+          cobrar esta el boton de la cuenta, y el monto lo pone el pedido, no
+          una persona escribiendo un numero. Y "la direccion del local" se leia
+          como la direccion de la calle cuando era la de la billetera. */}
+      {["¿cuánto llevamos cobrado hoy?", "¿qué mesas faltan pagar?", "¿cuánto tenemos en la billetera del local?", "¿cuánta propina juntamos?"].map((q) =>
         <button key={q} disabled={busy || !disponible} onClick={() => { setConsulta(q); void preguntar(q); }}>{q}</button>)}
     </div>
 

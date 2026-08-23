@@ -79,6 +79,17 @@ export interface HerramientasCaja {
   verDireccion(wallet: string): Promise<ResultadoHerramienta>;
   /** `wdk send --dry-run` — llega hasta el preview y no más. */
   cotizarCobro(montoUsdt: number, destinatario: string): Promise<ResultadoHerramienta>;
+  /**
+   * El corte del día: cuánto se cobró, por qué método, cuánta propina y cuánto
+   * tiene que haber en el cajón.
+   *
+   * Es la pregunta que un encargado hace de verdad. "Cobrale 500 USDT" no la
+   * hace nadie: para cobrar está el botón, y el monto lo pone la cuenta, no una
+   * persona escribiendo un número.
+   */
+  verCaja(): Promise<ResultadoHerramienta>;
+  /** Qué mesas siguen abiertas y quién todavía no pagó. */
+  verMesas(): Promise<ResultadoHerramienta>;
 }
 
 export interface TrazaPaso {
@@ -103,7 +114,7 @@ export interface ResultadoAgente {
 }
 
 /** Lo único que el modelo puede emitir. Es el enum de la gramática. */
-export const ACCIONES = ["ver_saldo", "ver_direccion", "cotizar_cobro", "responder"] as const;
+export const ACCIONES = ["ver_saldo", "ver_caja", "ver_mesas", "ver_direccion", "cotizar_cobro", "responder"] as const;
 export type Accion = (typeof ACCIONES)[number];
 
 export class AgenteCaja {
@@ -256,6 +267,16 @@ export class AgenteCaja {
 
   /** Las políticas se evalúan ACÁ, no en el prompt. */
   private async ejecutar(paso: PasoAgente): Promise<{ texto: string; bloqueado: boolean; preview?: unknown }> {
+    if (paso.accion === "ver_caja") {
+      const r = await this.herramientas.verCaja();
+      return { texto: r.ok ? r.texto : `ERROR: ${r.texto}`, bloqueado: false };
+    }
+
+    if (paso.accion === "ver_mesas") {
+      const r = await this.herramientas.verMesas();
+      return { texto: r.ok ? r.texto : `ERROR: ${r.texto}`, bloqueado: false };
+    }
+
     if (paso.accion === "ver_saldo" || paso.accion === "ver_direccion") {
       const wallet = paso.wallet ?? "";
       // Redundante con la gramática, y a propósito: si mañana alguien cambia el
@@ -342,6 +363,9 @@ function argumentosDe(paso: PasoAgente): Record<string, unknown> {
     if (paso.wallet !== undefined) args["wallet"] = paso.wallet;
     return args;
   }
+  // ver_caja y ver_mesas no llevan argumentos: mostrar los que el esquema
+  // obliga a completar solo ensuciaria la traza.
+  if (paso.accion === "ver_caja" || paso.accion === "ver_mesas") return args;
   if (paso.accion === "cotizar_cobro") {
     if (paso.montoUsdt !== undefined) args["montoUsdt"] = paso.montoUsdt;
     if (paso.destinatario !== undefined) args["destinatario"] = paso.destinatario;

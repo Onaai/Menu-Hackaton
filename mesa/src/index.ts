@@ -131,7 +131,7 @@ const politicasAgente: PoliticasAgente = {
 const agente = asistente
   ? new AgenteCaja(
       new MotorAgenteQvac(asistente),
-      new HerramientasWdkCli(checkoutWallet, arsPerUsdt),
+      new HerramientasWdkCli(checkoutWallet, arsPerUsdt, extensions, sessions),
       ["caja", "cliente"],
       politicasAgente,
     )

@@ -38,6 +38,8 @@ function herramientas(parcial: Partial<HerramientasCaja> = {}): HerramientasCaja
     async verSaldo(wallet) { llamadas.push(`verSaldo(${wallet})`); return parcial.verSaldo ? parcial.verSaldo(wallet) : ok("12.5 USDT en mesa-negocio-demo (red sepolia)"); },
     async verDireccion(wallet) { llamadas.push(`verDireccion(${wallet})`); return parcial.verDireccion ? parcial.verDireccion(wallet) : ok("0xABC (mesa-negocio-demo, sepolia)"); },
     async cotizarCobro(monto, destinatario) { llamadas.push(`cotizarCobro(${monto},${destinatario})`); return parcial.cotizarCobro ? parcial.cotizarCobro(monto, destinatario) : ok("vista previa lista", { previewId: "p1" }); },
+    async verCaja() { llamadas.push("verCaja()"); return parcial.verCaja ? parcial.verCaja() : ok("cobrado hoy $27.690 en 2 pagos · propinas $2.510 · en el cajon tiene que haber $8.000"); },
+    async verMesas() { llamadas.push("verMesas()"); return parcial.verMesas ? parcial.verMesas() : ok("2 mesas abiertas · mesa 12: 3 comensales, 1 sin pagar, cuenta pedida"); },
   };
 }
 
@@ -249,7 +251,7 @@ test("🔴 transmitir NO es una accion que el agente pueda elegir", async () => 
   const agente = new AgenteCaja(motorGuionado([]), herramientas(), WALLETS, POLITICAS);
   const acciones = agente.estado().accionesDelAgente;
   assert.ok(!acciones.some((a) => /send|transmit|ejecutar|confirmar/i.test(a)), `el enum tiene una accion que transmite: ${acciones.join(", ")}`);
-  assert.deepEqual(acciones, ["ver_saldo", "ver_direccion", "cotizar_cobro", "responder"]);
+  assert.deepEqual(acciones, ["ver_saldo", "ver_caja", "ver_mesas", "ver_direccion", "cotizar_cobro", "responder"]);
 });
 
 // ── El error de la herramienta ──────────────────────────────────────────────
@@ -345,4 +347,45 @@ test("los argumentos de la traza son solo los que aplican a esa accion", async (
   ]);
   const r = await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("saldo?");
   assert.deepEqual(r.traza[0]?.argumentos, { wallet: "caja" });
+});
+
+
+// ── Las herramientas de negocio ─────────────────────────────────────────────
+
+test("🔴 el corte del dia llega al modelo y este lo repite", async () => {
+  // Es la pregunta que un encargado hace de verdad. "Cobrale 500 USDT" no la
+  // hace nadie: para cobrar esta el boton, y el monto lo pone la cuenta.
+  const tools = herramientas();
+  const motor = motorGuionado([
+    { pensamiento: "miro el corte", accion: "ver_caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "Hoy se cobraron $27.690 en 2 pagos." },
+  ]);
+  const r = await new AgenteCaja(motor, tools, WALLETS, POLITICAS).atender("¿cuánto llevamos hoy?");
+
+  assert.deepEqual(tools.llamadas, ["verCaja()"]);
+  assert.match(motor.vistos[1]!.historial[0]!, /cobrado hoy \$27\.690/);
+  assert.equal(r.cierre, "respondio");
+});
+
+test("las mesas abiertas se pueden consultar", async () => {
+  const tools = herramientas();
+  const motor = motorGuionado([
+    { pensamiento: "veo las mesas", accion: "ver_mesas" },
+    { pensamiento: "listo", accion: "responder", respuesta: "Quedan 2 mesas abiertas." },
+  ]);
+  await new AgenteCaja(motor, tools, WALLETS, POLITICAS).atender("¿qué mesas faltan?");
+  assert.deepEqual(tools.llamadas, ["verMesas()"]);
+  assert.match(motor.vistos[1]!.historial[0]!, /2 mesas abiertas/);
+});
+
+test("ver_caja y ver_mesas no ensucian la traza con argumentos que no usan", async () => {
+  // El esquema obliga al modelo a completar wallet, montoUsdt y destinatario en
+  // TODOS los pasos. Mostrarlos en un ver_caja haria parecer que esta por mover
+  // plata cuando solo esta mirando el corte.
+  const motor = motorGuionado([
+    { pensamiento: "corte", accion: "ver_caja", wallet: "caja", montoUsdt: 0, destinatario: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "ok" },
+  ]);
+  const r = await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("corte?");
+  assert.deepEqual(r.traza[0]?.argumentos, {});
 });

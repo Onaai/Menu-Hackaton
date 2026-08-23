@@ -1,6 +1,8 @@
 import type { HerramientasCaja } from "../application/agente-caja.js";
 import type { ResultadoHerramienta } from "../application/agente-puertos.js";
 import type { CheckoutWalletGateway } from "../application/checkout-wallet.js";
+import type { HackathonExtensionsService } from "../application/hackathon-extensions-service.js";
+import type { SessionRepository } from "../application/ports.js";
 
 /**
  * Las herramientas del agente, cableadas contra WDK CLI de verdad.
@@ -26,9 +28,59 @@ export class HerramientasWdkCli implements HerramientasCaja {
   constructor(
     private readonly gateway: CheckoutWalletGateway,
     private readonly arsPerUsdt: number,
+    /** Para el corte del dia y el estado de las mesas. */
+    private readonly extensions: HackathonExtensionsService,
+    private readonly sessions: SessionRepository,
     /** Nombre de la allowlist -> rol real de la wallet. */
     private readonly destinos: Record<string, "client" | "business"> = { caja: "business" },
   ) {}
+
+  /**
+   * El corte del dia, en una linea que el modelo pueda leer y repetir.
+   *
+   * Se le da MASTICADO y no como JSON: un 4B con un objeto anidado adelante
+   * tiende a inventarse campos que no existen. Con una oracion armada en
+   * codigo, lo unico que tiene que hacer es elegir el numero que le
+   * preguntaron.
+   */
+  async verCaja(): Promise<ResultadoHerramienta> {
+    try {
+      const f = await this.extensions.getFinancialSummary();
+      const pesos = (centavos: number) => "$" + (centavos / 100).toLocaleString("es-AR");
+      const m = f.porMetodo;
+      const texto = [
+        `cobrado hoy ${pesos(f.clientExpensesInCents)} en ${m.wallet.cantidad + m.efectivo.cantidad + m.mercadoPago.cantidad} pagos`,
+        `ingresos ${pesos(f.businessRevenueInCents)}`,
+        `propinas ${pesos(f.tipsInCents)}`,
+        `billetera ${m.wallet.cantidad} pagos ${pesos(m.wallet.totalInCents)} (${f.usdtReceived ?? "0"} USDT)`,
+        `efectivo ${m.efectivo.cantidad} pagos ${pesos(m.efectivo.totalInCents)}`,
+        `Mercado Pago ${m.mercadoPago.cantidad} pagos ${pesos(m.mercadoPago.totalInCents)}`,
+        `en el cajon tiene que haber ${pesos(m.efectivo.enElCajon)}`,
+      ].join(" · ");
+      return { ok: true, texto, datos: f };
+    } catch (error) {
+      return { ok: false, texto: mensajeDe(error) };
+    }
+  }
+
+  /** Que mesas siguen abiertas y quien no pago. */
+  async verMesas(): Promise<ResultadoHerramienta> {
+    try {
+      const todas = await this.sessions.list();
+      const abiertas = todas.filter((s) => s.status !== "CLOSED");
+      if (abiertas.length === 0) return { ok: true, texto: "no hay mesas abiertas: esta todo cobrado" };
+
+      const detalle = abiertas.map((s) => {
+        const pagaron = new Set(s.payments.filter((p) => p.mode === "INDIVIDUAL" && p.dinerId).map((p) => p.dinerId));
+        const deben = s.diners.filter((d) => !pagaron.has(d.id)).length;
+        const estado = s.status === "BILL_REQUESTED" ? "cuenta pedida" : "pidiendo";
+        return `mesa ${s.tableNumber}: ${s.diners.length} comensales, ${deben} sin pagar, ${estado}`;
+      }).join(" · ");
+      return { ok: true, texto: `${abiertas.length} mesas abiertas · ${detalle}` };
+    } catch (error) {
+      return { ok: false, texto: mensajeDe(error) };
+    }
+  }
 
   async verSaldo(wallet: string): Promise<ResultadoHerramienta> {
     try {
