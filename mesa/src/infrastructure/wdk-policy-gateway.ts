@@ -34,7 +34,7 @@ export class WdkPolicySimulationGateway implements PaymentGateway {
       .registerWallet("ethereum", WalletManagerEvm, { chainId: 11155111 })
       .registerPolicy({
         id: "mesa-abierta-testnet-payment",
-        name: "Pagos de prueba de Mesa Abierta",
+        name: "Pagos de prueba de Al Toque",
         scope: "project",
         wallet: "ethereum",
         rules: [

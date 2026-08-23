@@ -1,4 +1,4 @@
-# Integración WDK — Mesa Abierta
+# Integración WDK — Al Toque
 
 ## Track elegido
 
@@ -27,7 +27,7 @@ WDK no está agregado como una capa paralela: el checkout de testnet depende del
 
 1. Cocina entrega todas las comandas.
 2. El comensal solicita la cuenta.
-3. Mesa Abierta calcula pago individual o de mesa + propina.
+3. Al Toque calcula pago individual o de mesa + propina.
 4. Se lee la dirección pública de `mesa-negocio-demo` mediante WDK CLI.
 5. WDK SDK evalúa la intención para ese destinatario y monto.
 6. Si WDK no devuelve `ALLOW`, no se continúa.

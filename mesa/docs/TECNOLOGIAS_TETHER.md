@@ -16,7 +16,7 @@ Fecha: 22 de agosto de 2026.
 
 ## WDK: integración implementada
 
-### Valor para Mesa Abierta
+### Valor para Al Toque
 
 WDK se relaciona directamente con la parte más diferencial del producto: dividir y pagar la cuenta. Su sistema de políticas permite evaluar una operación con reglas ALLOW/DENY y ofrece un espejo `simulate` que no ejecuta, firma ni transmite la transacción.
 
@@ -24,7 +24,7 @@ WDK se relaciona directamente con la parte más diferencial del producto: dividi
 
 1. El sistema calcula cuánto debe pagar cada comensal.
 2. El comensal elige propina y solicita pagar.
-3. Mesa Abierta crea una intención de transferencia en una red de prueba.
+3. Al Toque crea una intención de transferencia en una red de prueba.
 4. Una política WDK controla red, token, destinatario, monto máximo y comisión máxima.
 5. Se ejecuta solamente la simulación de la política.
 6. El resultado ALLOW o DENY se muestra y se registra como parte de la demo.
@@ -95,7 +95,7 @@ Replicar comandas entre caja, cocina y barra mediante Hypercore/Hyperbee e Hyper
 
 ### Motivo para postergarlo
 
-Pear está orientado a aplicaciones ejecutadas mediante Pear/Bare, Electron, React Native o binarios propios. El flujo principal de Mesa Abierta pretende que un cliente escanee un QR y entre desde un navegador sin instalar nada.
+Pear está orientado a aplicaciones ejecutadas mediante Pear/Bare, Electron, React Native o binarios propios. El flujo principal de Al Toque pretende que un cliente escanee un QR y entre desde un navegador sin instalar nada.
 
 Introducir Pear en el teléfono del comensal cambiaría esa experiencia. Podría utilizarse solamente entre dispositivos internos del restaurante, pero para el MVP agrega complejidad sin mejorar la demostración principal.
 

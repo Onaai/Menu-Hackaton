@@ -63,7 +63,7 @@ Cuando arranca vas a ver esto:
   Cotización         1 USDT = $1.480
 
   Mesa 7 abierta · session_...
-    Mesa Abierta · caja     0x...  0,00 USDT
+    Al Toque · caja     0x...  0,00 USDT
     Sofía                   0x...  200,00 USDT
     Emi                     0x...  12,00 USDT
 ```
@@ -195,7 +195,7 @@ Las tres que arrancan:
 
 | Billetera | Tipo | Saldo | Para qué está |
 |---|---|---|---|
-| Mesa Abierta · caja | negocio | 0 USDT | Es donde tiene que llegar la plata. Empieza en cero a propósito: el destello de que sube es la demo |
+| Al Toque · caja | negocio | 0 USDT | Es donde tiene que llegar la plata. Empieza en cero a propósito: el destello de que sube es la demo |
 | Sofía | cliente | 200 USDT | Paga sin problema |
 | Emi | cliente | **12 USDT** | **No le alcanza.** Muestra que el sistema frena en vez de dejar saldo negativo |
 

@@ -4,7 +4,7 @@ const client = process.env.WDK_CLIENT_WALLET || "mesa-cliente-demo";
 const business = process.env.WDK_BUSINESS_WALLET || "mesa-negocio-demo";
 const executable = process.env.WDK_CLI_BIN || "wdk";
 
-console.log("\nMesa Abierta · WDK CLI wallet setup");
+console.log("\nAl Toque · WDK CLI wallet setup");
 console.log("----------------------------------");
 console.log("Se crearán DOS wallets dedicadas exclusivamente a Sepolia/testnet:");
 console.log(`  cliente : ${client}`);
