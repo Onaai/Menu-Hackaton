@@ -19,3 +19,36 @@
 .assistant-descartes{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .assistant-descartes summary{color:var(--muted);font-size:10px;font-weight:700;cursor:pointer}
 .assistant-descartes ul{margin:6px 0 0;padding-left:16px;color:var(--muted);font-size:10px;line-height:1.6}
+
+/* ── Panel del agente de caja ────────────────────────────────────────────────
+   La traza es lo que hace auditable a un modelo que toca plata: cada paso
+   muestra el pensamiento, la herramienta y el resultado. Los pasos que freno
+   una politica se pintan en ambar para que el rechazo se VEA. */
+.agente-panel{margin:18px 0 22px;padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow)}
+.agente-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.agente-head h2{margin:2px 0 0;font:700 24px/1.1 "Fraunces",serif;letter-spacing:-.02em}
+.agente-politicas{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 8px}
+.agente-politicas span{border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:10px;font-weight:700}
+.agente-politicas b{color:var(--ink)}
+.agente-alcance{margin:4px 0 12px;color:var(--muted);font-size:11px;line-height:1.55}
+.agente-alcance code{background:#eef2f7;border-radius:5px;padding:1px 5px;font-size:10px}
+.agente-ask{display:flex;gap:8px}
+.agente-ask input{flex:1;border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:12px;background:#fff}
+.agente-ask button{border:0;border-radius:10px;background:var(--navy);color:#fff;padding:0 16px;font-size:11px;font-weight:800;cursor:pointer}
+.agente-ask button:disabled{opacity:.45;cursor:not-allowed}
+.agente-sugeridas{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.agente-sugeridas button{border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);padding:6px 11px;font-size:10px;font-weight:700;cursor:pointer}
+.agente-sugeridas button:disabled{opacity:.45;cursor:not-allowed}
+.agente-resultado{margin-top:14px}
+.agente-respuesta{border-left:3px solid var(--green);background:var(--green-soft);border-radius:0 10px 10px 0;padding:11px 13px;font-size:13px;line-height:1.5}
+.agente-traza{margin-top:10px}
+.agente-traza summary{color:var(--muted);font-size:10px;font-weight:800;cursor:pointer;letter-spacing:.03em}
+.agente-traza ol{margin:8px 0 0;padding-left:0;list-style:none;display:grid;gap:7px}
+.agente-traza li{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fbfcfe}
+.agente-traza li.bloqueado{border-color:var(--amber);background:var(--amber-soft)}
+.paso-accion{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.paso-accion code{background:var(--navy);color:#fff;border-radius:5px;padding:2px 7px;font-size:10px;font-weight:700}
+.paso-accion small{color:var(--muted);font-size:10px}
+.chip-bloqueado{background:var(--amber);color:#fff;border-radius:999px;padding:2px 8px;font-size:9px;font-weight:800}
+.paso-pensamiento{margin-top:5px;color:var(--muted);font-size:11px;font-style:italic;line-height:1.45}
+.paso-resultado{margin-top:4px;font-size:11px;line-height:1.5}

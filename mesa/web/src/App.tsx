@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, patch, post } from "./api";
-import type { BillSummary, CheckoutPreviewResponse, Diner, FinancialSummary, KitchenOrder, MenuAssistantResponse, MenuItem, OrderStatus, PaymentMode, TableSession, WalletPair, WdkCliPayment } from "./types";
+import type { BillSummary, CheckoutPreviewResponse, Diner, EstadoAgente, FinancialSummary, KitchenOrder, MenuAssistantResponse, MenuItem, OrderStatus, PaymentMode, RespuestaAgente, TableSession, WalletPair, WdkCliPayment } from "./types";
 
 const money = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 const statusLabel: Record<OrderStatus, string> = { RECEIVED: "Recibido", PREPARING: "En preparación", READY: "Listo", DELIVERED: "Entregado" };
@@ -214,7 +214,106 @@ function KitchenView({ navigate }: { navigate: (path: string) => void }) {
   useEffect(() => { void refresh(); void refreshMoney(); const timer = window.setInterval(() => { void refresh(); void refreshMoney(); }, 2500); return () => window.clearInterval(timer); }, [refresh, refreshMoney]);
   const visible = useMemo(() => orders.filter((order) => filter === "ACTIVE" ? order.status !== "DELIVERED" : order.status === filter), [orders, filter]);
   const advance = async (order: KitchenOrder) => { const next = nextStatus[order.status]; if (!next) return; try { await patch(`/api/kitchen/orders/${order.id}/status`, { status: next }); await refresh(); } catch (cause) { setError(messageOf(cause)); } };
-  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div>{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}<div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}</main>;
+  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div><AgentePanel />{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}<div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}</main>;
+}
+
+/**
+ * El panel del agente de caja.
+ *
+ * Lo que hace que esto sea auditable y no una caja negra que mueve plata es la
+ * TRAZA: cada paso muestra que penso el modelo, que herramienta llamo, con que
+ * argumentos y que le contesto. El track pide que un humano pueda revisar lo
+ * que hizo el agente en cinco segundos.
+ *
+ * Los pasos que una politica freno se pintan distinto y dicen "bloqueado". Que
+ * el rechazo se vea es la mitad del punto: un agente que falla en silencio es
+ * peor que uno que no existe.
+ */
+function AgentePanel() {
+  const [consulta, setConsulta] = useState("");
+  const [resultado, setResultado] = useState<RespuestaAgente | null>(null);
+  const [estado, setEstado] = useState<EstadoAgente | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => { void api<EstadoAgente>("/api/agente").then(setEstado).catch(() => setEstado(null)); }, []);
+
+  const preguntar = async (texto: string) => {
+    const q = texto.trim();
+    if (!q || busy) return;
+    setBusy(true); setError(""); setResultado(null);
+    try { setResultado(await post<RespuestaAgente>("/api/agente", { consulta: q })); }
+    catch (cause) { setError(messageOf(cause)); }
+    finally { setBusy(false); }
+  };
+
+  const disponible = Boolean(estado?.politicas);
+
+  return <section className="agente-panel">
+    <div className="agente-head">
+      <div>
+        <span className="eyebrow">AGENTE DE CAJA · MODELO LOCAL</span>
+        <h2>Preguntale a la caja</h2>
+      </div>
+      {disponible
+        ? <span className="badge ia">IA local</span>
+        : <span className="badge reglas">modelo no cargado</span>}
+    </div>
+
+    {estado?.politicas && <div className="agente-politicas">
+      <span>tope/operacion <b>{estado.politicas.topePorOperacion} USDT</b></span>
+      <span>tope/dia <b>{estado.politicas.topeDiario} USDT</b></span>
+      <span>usado hoy <b>{estado.gastadoHoy} USDT</b></span>
+      <span>solo a <b>{estado.politicas.destinatariosPermitidos.join(", ")}</b></span>
+    </div>}
+
+    {/* Es la pregunta que va a hacer cualquiera que mire esto: si el modelo se
+        vuelve loco, cuanto puede mover. La respuesta va en pantalla. */}
+    <p className="agente-alcance">
+      El agente puede consultar saldos y <b>preparar</b> un cobro. No puede transmitirlo:
+      <code>wdk send</code> no esta entre sus acciones. La confirmacion la das vos.
+    </p>
+
+    <form className="agente-ask" onSubmit={(e) => { e.preventDefault(); void preguntar(consulta); }}>
+      <input value={consulta} maxLength={300} disabled={busy || !disponible}
+        placeholder="cuanto tenemos en la caja?"
+        onChange={(e) => setConsulta(e.target.value)} />
+      <button className="primary" type="submit" disabled={busy || !disponible || !consulta.trim()}>Preguntar</button>
+    </form>
+
+    <div className="agente-sugeridas">
+      {["¿cuánto tenemos en la caja?", "¿cuál es la dirección del local?", "cobrale 12 USDT a la mesa", "cobrale 500 USDT a la mesa"].map((q) =>
+        <button key={q} disabled={busy || !disponible} onClick={() => { setConsulta(q); void preguntar(q); }}>{q}</button>)}
+    </div>
+
+    {busy && <div className="notice">El modelo esta decidiendo que herramienta usar...</div>}
+    {error && <div className="notice warn">{error}</div>}
+
+    {resultado && <div className="agente-resultado">
+      <div className="agente-respuesta">{resultado.respuesta}</div>
+
+      <details className="agente-traza" open>
+        <summary>Que hizo, paso por paso ({resultado.traza.length} · {resultado.latenciaTotalMs} ms)</summary>
+        <ol>
+          {resultado.traza.map((paso) => <li key={paso.numero} className={paso.bloqueado ? "bloqueado" : ""}>
+            <div className="paso-accion">
+              <code>{paso.accion}</code>
+              {Object.keys(paso.argumentos).length > 0 && <small>{JSON.stringify(paso.argumentos)}</small>}
+              {paso.bloqueado && <span className="chip-bloqueado">bloqueado por politica</span>}
+            </div>
+            <div className="paso-pensamiento">{paso.pensamiento}</div>
+            <div className="paso-resultado">{paso.resultado}</div>
+          </li>)}
+        </ol>
+      </details>
+
+      {resultado.cierre !== "respondio" && <div className="notice warn">
+        {resultado.cierre === "sin-pasos"
+          ? "Se quedo sin pasos. Prefiere decirlo antes que inventar un numero."
+          : "El modelo local no esta disponible."}
+      </div>}
+    </div>}
+  </section>;
 }
 
 function StateCard({ title, text }: { title: string; text: string }) { return <main className="state-wrap"><section><span className="brand-mark">M</span><h1>{title}</h1><p>{text}</p></section></main>; }

@@ -20,3 +20,8 @@ export interface CheckoutPreview { previewId: string; expiresAt: string; network
 export interface CheckoutPreviewResponse { policyEvaluation: PaymentEvaluation; preview: CheckoutPreview; }
 export interface FinancialSummary { payments: number; clientExpensesInCents: number; businessRevenueInCents: number; tipsInCents: number; usdtReceived: string | null; businessProfitInCents: null; profitReason: string; }
 export interface MenuAssistantResponse { engine: "QVAC_LOCAL" | "LOCAL_RECOMMENDATION_RULES"; title: string; message: string; items: MenuItem[]; note: string; motivos?: Record<string, string>; descartadas?: Array<{ texto: string; razon: string }>; }
+
+export interface PasoTraza { numero: number; pensamiento: string; accion: string; argumentos: Record<string, unknown>; resultado: string; bloqueado: boolean; latenciaMs: number; }
+export interface RespuestaAgente { respuesta: string; traza: PasoTraza[]; cierre: "respondio" | "sin-pasos" | "sin-modelo"; cotizacion: unknown | null; latenciaTotalMs: number; }
+export interface PoliticasAgente { topePorOperacion: number; topeDiario: number; destinatariosPermitidos: string[]; maxPasos: number; }
+export interface EstadoAgente { politicas?: PoliticasAgente; gastadoHoy?: number; disponibleHoy?: number; dia?: string; accionesDelAgente?: string[]; transmitir?: string; disponible?: boolean; motivo?: string; }
