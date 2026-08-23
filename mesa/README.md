@@ -1,4 +1,4 @@
-# Mesa Abierta
+# Al Toque
 
 > Aleph Hackathon 2026 · Tether
 
@@ -27,6 +27,11 @@ npm start
 | `http://localhost:3000/mesa/12/pedido` | Sus pedidos |
 | `http://localhost:3000/cocina` | Cocina y caja — **acá está el agente** |
 
+Además: cronómetro por comanda en cocina —ámbar a los 10 minutos, rojo a los
+20—, botón de llamar al mozo con aviso en la pantalla del local, y tope de 3
+comandas sin entregar por comensal, que es lo que frena a alguien que escanea el
+QR, se va del restaurante y sigue pidiendo desde afuera.
+
 Node ≥ 22.18.0. La primera corrida baja el modelo (2,5 GB) a `~/.qvac/models`
 con progreso en la terminal. Después arranca en ~11 s.
 
@@ -37,18 +42,29 @@ con progreso en la terminal. Después arranca en ~11 s.
 Esto es lo que hay que mirar primero. Es una sola función del producto que cae
 en los dos tracks a la vez.
 
-El encargado escribe **"¿cuánto tenemos en la caja?"** y un Qwen3 4B que corre
-en la CPU del local decide llamar a `ver_saldo`, que por debajo es
-`wdk get balance --network sepolia --token usdt --json`. Lee la respuesta y
-contesta con **ese** número.
+El encargado escribe **"¿cuánto llevamos cobrado hoy?"** y un Qwen3 4B que corre
+en la CPU del local decide llamar a `ver_caja`, lee el corte del día y contesta
+con **esos** números:
 
-Escribe **"cobrale 12 USDT a la mesa"** y el modelo llama a `cotizar_cobro`,
-que es `wdk send --dry-run --json`. La vista previa queda esperando que una
-persona confirme.
+```
+> ¿cuánto llevamos cobrado hoy?
+  1. [ver_caja]  → cobrado hoy $19.690 en 1 pagos · ingresos $17.900 · propinas $1.790 …
+  2. [responder] → "Hoy se ha cobrado un total de $19.690, incluyendo $17.900
+                    en ingresos y $1.790 en propinas."
 
-Escribe **"cobrale 500 USDT"** y no pasa nada, porque una política lo frena
-antes de tocar el CLI — y el rechazo vuelve al modelo, que tiene que
-explicárselo al encargado.
+> ¿qué mesas faltan pagar?
+  1. [ver_mesas] → 1 mesas abiertas · mesa 5: 1 comensales, 1 sin pagar
+  2. [responder] → "Hay 1 mesa abierta: mesa 5 con 1 comensal sin pagar."
+```
+
+Pregunta **"¿cuánto tenemos en la billetera del local?"** y el modelo llama a
+`ver_saldo`, que por debajo es `wdk get balance --network sepolia --token usdt
+--json`. El número que dice es el que devolvió el comando, no uno inventado —
+eso se mide, más abajo.
+
+Y si le pedís que prepare un cobro, llama a `cotizar_cobro`, que es
+`wdk send --dry-run --json`. La vista previa queda esperando que una persona
+confirme: **el agente nunca transmite**.
 
 ### El modelo de seguridad
 
@@ -64,32 +80,40 @@ que la gramática no puede emitir.** No hay prompt que lo destrabe, porque no
 pasa por el prompt. Una inyección en el campo de texto tampoco, por el mismo
 motivo.
 
-**2 · Las políticas, en código.** Tope por operación y tope diario se evalúan
-en TypeScript, sobre la propuesta ya emitida, **antes** de tocar el CLI. Salen
-del entorno (`AGENTE_TOPE_OPERACION`, `AGENTE_TOPE_DIARIO`,
+**2 · Las políticas, en código.** Tope por operación, tope diario y allowlist se
+evalúan en TypeScript, sobre la propuesta ya emitida, **antes** de tocar el CLI.
+Salen del entorno (`AGENTE_TOPE_OPERACION`, `AGENTE_TOPE_DIARIO`,
 `AGENTE_DESTINATARIOS`): son *user-defined guardrails* de verdad, no constantes
 escondidas.
+
+Los valores por defecto —1000 USD₮ por operación, 5000 por día— están altos a
+propósito. Arrancaron en 25 y 100, y en la práctica frenaban cuentas normales:
+una mesa de cuatro ya pasa los 25, así que el agente chocaba con su propio tope
+preparando un cobro que el botón de la cuenta sí permitía. Un tope que se
+dispara con una cuenta común no protege, estorba. Cuando **sí** se disparan, el
+rechazo vuelve al modelo como resultado de herramienta y aparece en la traza,
+en ámbar, con el motivo.
 
 **3 · El humano.** `wdk send` —el que transmite— **no está entre las acciones
 del agente**. El agente llega hasta el dry-run y ahí se termina su alcance. Hay
 un test que falla si alguien agrega una acción que transmita.
 
-El peor caso de que el modelo se vuelva loco es que proponga un dry-run a la
-caja del local por un monto bajo el tope. Es lo mismo que puede hacer el botón
-de cobrar.
+El peor caso de que el modelo se vuelva loco —o de que alguien le escriba una
+inyección en el campo de texto— es que proponga un dry-run a la caja del local
+por un monto bajo el tope. Es lo mismo que puede hacer el botón de cobrar.
 
 ### Dónde mirar
 
 | Qué | Permalink |
 |---|---|
-| **El bucle del agente y las políticas** | [`agente-caja.ts`](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/application/agente-caja.ts) |
-| Las cuatro acciones — ninguna transmite | [L106](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/application/agente-caja.ts#L106) |
-| El tope por operación, antes del CLI | [L220](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/application/agente-caja.ts#L220) |
-| La allowlist, chequeada en código | [L214](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/application/agente-caja.ts#L214) |
-| **La allowlist hecha gramática** | [`motor-agente-qvac.ts` L69](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/motor-agente-qvac.ts#L69) |
-| El esquema completo del paso | [L59-L76](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/motor-agente-qvac.ts#L59-L76) |
-| Las herramientas, contra WDK CLI real | [`herramientas-wdk-cli.ts`](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/herramientas-wdk-cli.ts) |
-| El test que impide agregar una acción que transmita | [`agente-caja.test.ts`](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/tests/agente-caja.test.ts) |
+| **El bucle del agente y las políticas** | [`agente-caja.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/application/agente-caja.ts) |
+| Las seis acciones — ninguna transmite | [L117](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/application/agente-caja.ts#L117) |
+| El tope por operación, antes del CLI | [L303](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/application/agente-caja.ts#L303) |
+| La allowlist, chequeada en código | [L297](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/application/agente-caja.ts#L297) |
+| **La allowlist hecha gramática** | [`motor-agente-qvac.ts` L97](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/motor-agente-qvac.ts#L97) |
+| El esquema completo del paso | [L84-L102](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/motor-agente-qvac.ts#L84-L102) |
+| Las herramientas, contra WDK CLI real | [`herramientas-wdk-cli.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/herramientas-wdk-cli.ts) |
+| El test que impide agregar una acción que transmita | [`agente-caja.test.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/tests/agente-caja.test.ts) |
 
 ---
 
@@ -107,11 +131,11 @@ send, con la vista previa expirable, de un solo uso y atada al monto.
 
 | Qué | Permalink |
 |---|---|
-| **El gateway de WDK CLI** | [`wdk-cli-checkout-gateway.ts`](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts) |
-| `wdk send --dry-run --json` | [L43-L67](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L43-L67) |
-| `wdk send --json` (transmite) | [L69](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L69) |
-| El preview se marca usado **antes** del broadcast | [L78](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L78) |
-| Las políticas del SDK (`ALLOW`/`DENY`) | [`wdk-policy-gateway.ts`](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/wdk-policy-gateway.ts) |
+| **El gateway de WDK CLI** | [`wdk-cli-checkout-gateway.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts) |
+| `wdk send --dry-run --json` | [L43-L67](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L43-L67) |
+| `wdk send --json` (transmite) | [L69](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L69) |
+| El preview se marca usado **antes** del broadcast | [L78](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-cli-checkout-gateway.ts#L78) |
+| Las políticas del SDK (`ALLOW`/`DENY`) | [`wdk-policy-gateway.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-policy-gateway.ts) |
 
 Un `send` exitoso es el punto irreversible: si después falla la lectura de
 balances, igual se devuelve el recibo, para que la app registre el broadcast y
@@ -137,6 +161,59 @@ video.** Sepolia y wallets dedicadas: nunca una personal, nunca mainnet.
 
 ---
 
+## Los otros dos métodos de pago
+
+El checkout no es solo cripto, porque un restaurante tampoco lo es.
+
+**Efectivo.** Ponés con cuánto paga la persona y el vuelto se calcula en vivo.
+Con menos de lo que sale la cuenta dice *"Falta $5.180"* y no deja cobrar; con
+un billete de más, el botón mismo dice *"Cobrar y dar $4.820 de vuelto"*. En el
+celular el vuelto va **arriba** del campo, porque abajo lo tapa el teclado.
+
+En el corte de caja va el número que casi siempre se hace mal: **en el cajón
+queda lo cobrado, no lo recibido**. Entraron $20.000, salieron $4.820 de vuelto,
+quedan $15.180. Contar lo recibido haría cerrar la caja de más todas las noches.
+
+**Mercado Pago.** Un botón y un logo. No hay API, ni credenciales, ni webhook.
+Se registra con `simulado: true` —un campo del tipo, no un comentario que se
+desactualiza— y la pantalla lo dice.
+
+Los dos caminos reusan las mismas validaciones que el de WDK: cuenta pedida, sin
+mezclar formas de división, sin cobrar dos veces al mismo comensal. Un camino de
+pago con reglas más flojas que el otro es como se cobra dos veces una mesa.
+
+---
+
+## El modo simulado de WDK CLI
+
+Conseguir USD₮ de testnet en Sepolia lleva su tiempo, y sin saldo el checkout no
+se puede mostrar: el preview sale, el `send` falla, y la demo queda por la
+mitad. `WDK_CLI_MODE=simulado` enchufa un CLI de mentira con saldo inicial.
+
+```bash
+set "WDK_CLI_MODE=simulado" && set "WDK_SALDO_CLIENTE=50" && npm start
+```
+
+**No es un atajo escondido.** Se enchufa en el `CliRunner` que
+`WdkCliCheckoutGateway` ya recibía por constructor, así que **el gateway no sabe
+que existe**: el preview de un solo uso, el vencimiento, el amarre al monto y el
+marcar-usado-antes-de-transmitir son exactamente los mismos. Lo único que cambia
+es de dónde salen los bytes del JSON.
+
+Y se grita en tres lugares: la terminal al arrancar, `GET /api/config`, y un
+cartel ámbar en el checkout. Un pago simulado que se hace pasar por real es lo
+que un jurado tiene que poder descartar de un vistazo.
+
+Sin esa variable corre el binario `wdk` de verdad.
+
+| Qué | Permalink |
+|---|---|
+| El CLI simulado | [`wdk-cli-simulado.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/wdk-cli-simulado.ts) |
+| Los pagos en efectivo y Mercado Pago | [`hackathon-extensions-service.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/application/hackathon-extensions-service.ts) |
+| Sus tests | [`pagos-locales.test.ts`](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/tests/pagos-locales.test.ts) |
+
+---
+
 ## Integración con QVAC
 
 ```
@@ -149,11 +226,11 @@ vez; después la app anda con el cable desenchufado.
 
 | Qué | Permalink |
 |---|---|
-| `loadModel` | [`qvac-sdk-assistant.ts` L88](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/qvac-sdk-assistant.ts#L88) |
-| `completion` con `responseFormat` | [L137](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/qvac-sdk-assistant.ts#L137) |
-| La misma vuelta, reusada por el agente | [L184](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/qvac-sdk-assistant.ts#L184) |
-| **El esquema que se vuelve gramática** | [L313-L340](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/qvac-sdk-assistant.ts#L313-L340) |
-| Qué platos puede nombrar esta persona | [L300](https://github.com/Onaai/Menu-Hackaton/blob/32e31e3a2a809ca946891cdb085af5146376d38c/mesa/src/infrastructure/qvac-sdk-assistant.ts#L300) |
+| `loadModel` | [`qvac-sdk-assistant.ts` L99](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/qvac-sdk-assistant.ts#L99) |
+| `completion` con `responseFormat` | [L161](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/qvac-sdk-assistant.ts#L161) |
+| La misma vuelta, reusada por el agente | [L208](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/qvac-sdk-assistant.ts#L208) |
+| **El esquema que se vuelve gramática** | [L337-L370](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/qvac-sdk-assistant.ts#L337-L370) |
+| Qué platos puede nombrar esta persona | [L324](https://github.com/Onaai/Menu-Hackaton/blob/d05032c674362240b6f718a47cfcf5b01278be8e/mesa/src/infrastructure/qvac-sdk-assistant.ts#L324) |
 
 ### El modelo no puede inventar un plato
 
@@ -289,19 +366,25 @@ número de este README está estimado.
 
 ```bash
 npm run typecheck && npm test
-# tests 76 · pass 76 · fail 0
+# tests 79 · pass 79 · fail 0
 ```
 
-Verificado además a mano: el asistente respondiendo consultas libres por HTTP
-con las tres restricciones; el arranque cargando el modelo; el apagado ordenado
-liberando el worker; y la interfaz en el navegador cayendo al motor
-determinista y **diciéndolo** cuando QVAC está apagado.
+Verificado además en el navegador, no solo por API: el asistente con las tres
+restricciones alimentarias; el agente contestando con el corte del día real; el
+cobro en efectivo con vuelto; el cobro con billetera de punta a punta —cliente
+50 → 30,31, negocio 0 → 19,69, la caja registrando la ganancia y la mesa
+quedando liberada—; el rechazo por saldo insuficiente; el tope de 20 unidades;
+el cronómetro corriendo; y la interfaz cayendo al motor determinista y
+**diciéndolo** cuando QVAC está apagado.
 
 ### Lo que NO está verificado
 
-- **El broadcast on-chain.** Hace falta crear las dos wallets de Sepolia y
-  financiarlas con USD₮ de testnet, y eso lo hace una persona con su seed. Hasta
-  que esa prueba corra, el pago on-chain **no se presenta como verificado**.
+- **El broadcast on-chain.** Las dos wallets de Sepolia están creadas y se
+  desbloquean bien —`wdk get address` y `wdk get balance` responden— pero están
+  en 0 USD₮: falta que alguien les mande USD₮ de prueba de
+  `0xd077A400968890Eacc75cdc901F0356c943e4fDb`. Hasta que esa transferencia
+  corra, el pago on-chain **no se presenta como verificado**, y el recorrido
+  completo se demuestra con `WDK_CLI_MODE=simulado`, declarado en pantalla.
 - **El motivo puede ser vacío de contenido** aunque sea gramaticalmente
   perfecto. Ninguna gramática puede exigir que una oración sea útil, y ningún
   validador puede medirlo sin poner otro modelo a juzgar.
@@ -334,7 +417,7 @@ src/application/     casos de uso · el agente y sus políticas
 src/infrastructure/  WDK CLI, políticas WDK, QVAC SDK, memoria
 src/api/             HTTP
 web/                 React + Vite: comensal y cocina/caja
-tests/               76 tests con node:test
+tests/               79 tests con node:test
 scripts/             setup de wallets y los dos arneses de confiabilidad
 ```
 
