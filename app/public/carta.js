@@ -50,13 +50,24 @@ async function cargar() {
   if (estado.cuenta.onboardingPendiente) abrirOnboarding();
 }
 
-/** Trae las sugerencias aparte: el modelo tarda y no puede frenar la carta. */
+/**
+ * Trae las sugerencias aparte: el modelo tarda y no puede frenar la carta.
+ *
+ * Con Qwen 4B en CPU son unos diez segundos. Sin avisar nada, la sección
+ * aparecía de golpe cuando la persona ya estaba leyendo otra cosa, y se leía
+ * como un salto de la página. Se marca que está pensando y se deja el lugar
+ * ocupado.
+ */
 async function cargarSugerencias() {
+  estado.pensando = true;
+  pintarParaVos();
   try {
     estado.sugerencias = await api("/api/sugerencias");
-    pintarParaVos();
   } catch {
     /* si falla, la sección simplemente no aparece */
+  } finally {
+    estado.pensando = false;
+    pintarParaVos();
   }
 }
 
@@ -238,11 +249,23 @@ function pintarParaVos() {
     );
   }
 
+  // Todavía no volvió el modelo. Solo se muestra si esta persona tiene
+  // historial: a alguien que entra por primera vez no le prometemos algo que
+  // no le vamos a dar.
+  if (estado.pensando && c && Object.keys(c.preferencias?.historial ?? {}).length > 0) {
+    return cont.replaceChildren(
+      el("div", { class: "fila", style: "margin:8px 0 12px" },
+        el("h2", { style: "margin:0" }, `Para vos, ${c?.nombre?.split(" ")[0] ?? ""}`),
+        el("span", { class: "chip", title: "El modelo corre en la máquina del local. Nada sale a internet." },
+          "la IA local está pensando…")),
+    );
+  }
+
   if (!r || r.sugerencias.length === 0) return cont.replaceChildren();
 
   const fuente = r.motor === "qvac-local"
     ? el("span", { class: "chip dieta" }, `IA local · ${r.modelo ?? "modelo"} · ${r.latenciaMs} ms`)
-    : el("span", { class: "chip", title: "El servidor de QVAC no respondió; esto sale de una regla simple." },
+    : el("span", { class: "chip", title: "El modelo local no cargó; esto sale de una regla simple, no de la IA." },
         "sin IA — modelo no disponible");
 
   cont.replaceChildren(
