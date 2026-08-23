@@ -18,7 +18,7 @@ const tools = {
   llamadas: [],
   async verSaldo(w) { tools.llamadas.push(`verSaldo(${w})`); return { ok: true, texto: `${SALDO} USDT en mesa-negocio-demo (red sepolia)` }; },
   async verDireccion(w) { tools.llamadas.push(`verDireccion(${w})`); return { ok: true, texto: `0x9f2C41aB (mesa-negocio-demo, sepolia)` }; },
-  async cotizarCobro(m, d) { tools.llamadas.push(`cotizarCobro(${m},${d})`); return { ok: true, texto: `vista previa lista: ${m} USDT` }; },
+  async cotizarCobro(m, d) { tools.llamadas.push(`cotizarCobro(${m},${d})`); return { ok: true, texto: `vista previa lista: ${m} USDT a mesa-negocio-demo. NO se transmitio: falta que una persona confirme.` }; },
 };
 
 // Motor que ademas imprime el JSON crudo, para ver que emitio la gramatica.

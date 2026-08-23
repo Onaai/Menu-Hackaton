@@ -124,9 +124,16 @@ export function armarPrompt(contexto: ContextoPaso): string {
     ? `\nESTO YA LO AVERIGUASTE (usá estos números, no otros):\n${contexto.historial.map((h, n) => `${n + 1}. ${h}`).join("\n")}`
     : "\nTodavía no usaste ninguna herramienta.";
 
+  // El cierre no puede empujar hacia "responder".
+  //
+  // Decía "¿Te alcanza para responder? Si sí, usá responder", y con una
+  // instrucción como "cobrale 12 USDT" el modelo la tomaba al pie de la letra:
+  // averiguaba el saldo y contestaba "podés cobrar 12", describiendo la acción
+  // en vez de ejecutarla. A un mozo al que le decís "cobrale" no le alcanza con
+  // avisarte que se puede cobrar.
   const cierre = contexto.historial.length
-    ? "\n¿Te alcanza para responder? Si sí, usá responder. Si no, usá otra herramienta."
-    : "\n¿Qué herramienta usás primero?";
+    ? "\n¿Ya podés hacer lo que te pidió? Si te pidió una acción (cobrar), hacela con la herramienta; no la describas. Si solo te preguntó algo y ya sabés la respuesta, usá responder."
+    : "\n¿Qué herramienta usás primero? Si te pidieron cobrar y sabés el monto, cotizá el cobro directamente.";
 
   return `EL ENCARGADO PREGUNTA: "${contexto.consulta}"${yaSabes}${cierre}`;
 }

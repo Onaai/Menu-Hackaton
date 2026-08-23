@@ -83,3 +83,12 @@
 .motivos-mozo button{border:1px solid var(--line);border-radius:11px;background:#fff;padding:13px;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
 .motivos-mozo button:hover{border-color:var(--navy);background:var(--blue-soft)}
 .motivos-mozo button:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── Quitar un producto del carrito ──────────────────────────────────────────
+   Antes la unica forma era bajar con el menos hasta cero: con tres unidades,
+   tres toques. La X esta al final de la linea y no al lado del menos para que
+   no se confunda con "bajar uno". 34px de lado: es un boton chico en una
+   pantalla tactil, y de menos no se acierta. */
+.cart-line{position:relative;align-items:center;gap:8px}
+.quitar-linea{flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;transition:.15s}
+.quitar-linea:hover{border-color:var(--red);background:var(--red-soft);color:var(--red)}

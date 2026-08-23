@@ -127,8 +127,18 @@ export class AgenteCaja {
     let cotizacion: unknown | null = null;
     // Lo que ya se ejecuto, para no repetirlo. Ver el bloque de mas abajo.
     const yaHecho = new Map<string, { numero: number; texto: string }>();
+    // Acciones que se le sacan del enum en las vueltas siguientes. Ver abajo.
+    const accionesBloqueadas = new Set<string>();
 
-    for (let numero = 1; numero <= this.politicas.maxPasos; numero++) {
+    // `numero` cuenta pasos PRODUCTIVOS. Una vuelta en la que el modelo repitio
+    // una herramienta no hizo trabajo, y cobrarsela lo dejaba sin presupuesto
+    // para la que si importaba: medido, "cobrale 12 USDT" gastaba cuatro de
+    // cinco vueltas repitiendo ver_saldo. Como al repetir se le saca la accion
+    // de la gramatica, cada herramienta se puede repetir a lo sumo una vez, y
+    // `desperdiciadas` pone un techo duro por si aparece otro camino.
+    let numero = 0;
+    let desperdiciadas = 0;
+    while (numero < this.politicas.maxPasos && desperdiciadas <= ACCIONES.length) {
       const tPaso = Date.now();
       const paso = await this.motor.siguientePaso({
         consulta,
@@ -138,7 +148,23 @@ export class AgenteCaja {
         // vueltas compartian el array, la primera "ya traia" lo que recien iba
         // a averiguar en la segunda.
         historial: [...conversacion],
-        acciones: [...ACCIONES],
+        // El enum se ACHICA a medida que el modelo agota una herramienta.
+        //
+        // Medido: pidiendole "cobrale 12 USDT" el modelo llamaba a ver_saldo,
+        // y despues volvia a llamar a ver_saldo tres veces mas. Quemaba los
+        // cinco pasos y terminaba respondiendo "la caja tiene 37.42, podes
+        // cobrar 12" — describiendo la accion en vez de hacerla. 96 segundos
+        // para no preparar el cobro.
+        //
+        // Devolverle el dato memorizado no alcanzaba: seguia eligiendo lo
+        // mismo. Lo que lo destraba es sacarle la opcion de la gramatica, que
+        // es el mismo mecanismo que usa todo el resto del diseno. Si no puede
+        // emitir el token, no hay bucle posible.
+        //
+        // `responder` nunca se bloquea: el agente siempre tiene que tener una
+        // salida, o se quedaria sin acciones validas y la gramatica no podria
+        // generar nada.
+        acciones: ACCIONES.filter((a) => a === "responder" || !accionesBloqueadas.has(a)),
         wallets: this.wallets,
         destinatarios: this.politicas.destinatariosPermitidos,
         politicas: this.politicas,
@@ -157,13 +183,14 @@ export class AgenteCaja {
       }
 
       if (paso.accion === "responder") {
+        numero++;
         traza.push({
           numero, pensamiento: paso.pensamiento, accion: "responder",
           argumentos: {}, resultado: paso.respuesta ?? "", bloqueado: false,
           latenciaMs: Date.now() - tPaso,
         });
         return {
-          respuesta: paso.respuesta?.trim() || "No tengo una respuesta para eso.",
+          respuesta: conAclaracion(paso.respuesta?.trim() || "No tengo una respuesta para eso.", cotizacion),
           traza, cierre: "respondio", cotizacion,
           latenciaTotalMs: Date.now() - t0,
         };
@@ -184,8 +211,12 @@ export class AgenteCaja {
       const firma = `${paso.accion}:${JSON.stringify(argumentosDe(paso))}`;
       const repetida = yaHecho.get(firma);
       if (repetida) {
+        // Ya la habia preguntado con estos mismos argumentos: a partir de
+        // ahora no puede volver a elegir esta herramienta.
+        accionesBloqueadas.add(paso.accion);
+        desperdiciadas++;
         traza.push({
-          numero, pensamiento: paso.pensamiento, accion: paso.accion,
+          numero: numero + 1, pensamiento: paso.pensamiento, accion: paso.accion,
           argumentos: argumentosDe(paso),
           resultado: `YA LO PREGUNTASTE en el paso ${repetida.numero}: ${repetida.texto}`,
           bloqueado: false, latenciaMs: Date.now() - tPaso,
@@ -194,6 +225,7 @@ export class AgenteCaja {
         continue;
       }
 
+      numero++;
       const { texto, bloqueado, preview } = await this.ejecutar(paso);
       if (preview !== undefined) cotizacion = preview;
       // Los rechazos de politica no se memorizan: si el modelo corrige el monto
@@ -315,4 +347,26 @@ function argumentosDe(paso: PasoAgente): Record<string, unknown> {
     if (paso.destinatario !== undefined) args["destinatario"] = paso.destinatario;
   }
   return args;
+}
+
+/**
+ * La aclaración que NO escribe el modelo.
+ *
+ * Medido: pidiéndole "cobrale 12 USDT" el agente preparó bien la vista previa y
+ * después contestó **"Cobro de 12 USDT a la caja realizado con éxito"**. Es
+ * mentira: se creó un dry-run y no se transmitió nada. Es la falla que el track
+ * nombra como inventar el resultado de una llamada, y en algo que mueve plata
+ * es la peor de todas — el encargado lee "realizado" y da por cobrada una mesa
+ * que no pagó.
+ *
+ * Pedirle en el prompt que no lo diga ayuda pero no alcanza: es una promesa del
+ * modelo sobre su propia salida. Esto no le pide nada. Si quedó una cotización
+ * abierta, la última palabra sobre si la plata se movió la pone el código, y no
+ * hay forma de que el modelo la contradiga.
+ */
+export function conAclaracion(respuesta: string, cotizacion: unknown | null): string {
+  if (!cotizacion) return respuesta;
+  const yaLoAclara = /todavía no se transmitió|falta que confirmes/i.test(respuesta);
+  if (yaLoAclara) return respuesta;
+  return `${respuesta}\n\n⚠️ Todavía no se transmitió: quedó preparado y falta que lo confirmes vos.`;
 }

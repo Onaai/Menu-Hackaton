@@ -77,15 +77,81 @@ test("🔴 el resultado de la herramienta vuelve al modelo en la vuelta siguient
   assert.match(motor.vistos[1]!.historial[0]!, /12\.5 USDT/);
 });
 
-test("se corta a los N pasos y lo dice, en vez de improvisar una respuesta", async () => {
+test("se corta a los N pasos productivos y lo dice, en vez de improvisar", async () => {
   // Un agente que admite que no llego vale mas que uno que inventa un numero.
-  const motor = motorGuionado(Array(10).fill({ pensamiento: "otra vez", accion: "ver_saldo", wallet: "caja" }));
+  // Se usan herramientas DISTINTAS para que cada vuelta sea productiva: si
+  // repitiera, entraria por el camino de las repetidas y no por el tope.
+  const motor = motorGuionado([
+    { pensamiento: "una", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "otra", accion: "ver_saldo", wallet: "cliente" },
+    { pensamiento: "y otra", accion: "ver_direccion", wallet: "caja" },
+    { pensamiento: "no deberia llegar", accion: "ver_direccion", wallet: "cliente" },
+  ]);
   const agente = new AgenteCaja(motor, herramientas(), WALLETS, { ...POLITICAS, maxPasos: 3 });
   const r = await agente.atender("dale vueltas");
 
   assert.equal(r.cierre, "sin-pasos");
   assert.equal(r.traza.length, 3);
   assert.match(r.respuesta, /no llegué a una respuesta/);
+});
+
+test("🔴 una vuelta repetida no gasta presupuesto de pasos", async () => {
+  // Medido con el modelo real: "cobrale 12 USDT" gastaba cuatro de cinco
+  // vueltas repitiendo ver_saldo y se quedaba sin lugar para cotizar el cobro,
+  // que era lo unico que le habian pedido.
+  const tools = herramientas();
+  const motor = motorGuionado([
+    { pensamiento: "saldo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "otra vez lo mismo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "ahora si cobro", accion: "cotizar_cobro", montoUsdt: 12, destinatario: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "Preparado." },
+  ]);
+  const r = await new AgenteCaja(motor, tools, WALLETS, { ...POLITICAS, maxPasos: 3 }).atender("cobrale 12");
+
+  // Con el conteo viejo la repetida se comia un paso y no quedaba lugar para
+  // cotizar. Ahora las tres cosas utiles entran en el presupuesto de 3.
+  assert.equal(r.cierre, "respondio");
+  assert.deepEqual(tools.llamadas, ["verSaldo(caja)", "cotizarCobro(12,caja)"]);
+});
+
+test("🔴 al modelo se le saca del enum la herramienta que repitio", async () => {
+  // No alcanza con devolverle el dato memorizado: el modelo volvia a elegir lo
+  // mismo. Lo que lo destraba es que la gramatica deje de ofrecerselo.
+  const motor = motorGuionado([
+    { pensamiento: "saldo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "de nuevo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "ok" },
+  ]);
+  await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("saldo?");
+
+  assert.ok(motor.vistos[1]!.acciones.includes("ver_saldo"), "en la 2da todavia podia elegirla");
+  assert.ok(!motor.vistos[2]!.acciones.includes("ver_saldo"), "en la 3ra ya no tenia que poder");
+  // Pero responder NUNCA se bloquea: sin salida, la gramatica no puede generar.
+  assert.ok(motor.vistos[2]!.acciones.includes("responder"));
+});
+
+test("🔴 si quedo una cotizacion, el codigo aclara que NO se transmitio", async () => {
+  // Medido: el modelo preparo bien la vista previa y despues contesto "Cobro de
+  // 12 USDT realizado con exito". El encargado lee "realizado" y da por cobrada
+  // una mesa que no pago. La ultima palabra sobre si la plata se movio la pone
+  // el codigo, no el modelo.
+  const motor = motorGuionado([
+    { pensamiento: "cobro", accion: "cotizar_cobro", montoUsdt: 12, destinatario: "caja" },
+    { pensamiento: "aviso", accion: "responder", respuesta: "Cobro de 12 USDT realizado con éxito." },
+  ]);
+  const r = await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("cobrale 12");
+
+  assert.match(r.respuesta, /Todavía no se transmitió/);
+  assert.ok(r.cotizacion, "tiene que haber quedado la cotizacion para confirmar");
+});
+
+test("sin cotizacion no se agrega ninguna aclaracion", async () => {
+  const motor = motorGuionado([
+    { pensamiento: "saldo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "Hay 12.5 USDT." },
+  ]);
+  const r = await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("saldo?");
+  assert.equal(r.respuesta, "Hay 12.5 USDT.");
 });
 
 test("si el modelo no esta, lo dice y no inventa", async () => {
