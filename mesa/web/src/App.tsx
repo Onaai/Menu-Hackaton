@@ -30,7 +30,11 @@ export default function App() {
 }
 
 function Header({ kitchen, orderView, tableNumber, navigate }: { kitchen: boolean; orderView: boolean; tableNumber: number; navigate: (path: string) => void }) {
-  return <header className="topbar"><button className="brand" onClick={() => navigate(`/mesa/${tableNumber}`)}><span className="brand-mark">M</span><span>Mesa Abierta</span></button><div className="table-pill">Mesa {tableNumber}</div>{kitchen ? <div className="staff-label">Vista interna · cocina</div> : <nav><button className={!orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}`)}>Menú</button><button className={orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}>Mi pedido</button></nav>}</header>;
+  return <header className="topbar"><button className="brand" onClick={() => navigate(kitchen ? "/cocina" : `/mesa/${tableNumber}`)}><span className="brand-mark">M</span><span>Mesa Abierta</span></button>{/* La chapita de mesa solo tiene sentido del lado del comensal: en la
+         pantalla del local se ven TODAS las mesas, asi que decir "Mesa 12"
+         arriba es informacion falsa. El 12 sale de la ruta por defecto, no de
+         nada real. */}
+    {!kitchen && <div className="table-pill">Mesa {tableNumber}</div>}{kitchen ? <div className="staff-label">Vista interna · cocina</div> : <nav><button className={!orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}`)}>Menú</button><button className={orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}>Mi pedido</button></nav>}</header>;
 }
 
 function DinerView({ tableNumber, orderView, navigate }: { tableNumber: number; orderView: boolean; navigate: (path: string) => void }) {
