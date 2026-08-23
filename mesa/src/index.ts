@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import { HackathonExtensionsService } from "./application/hackathon-extensions-service.js";
 import { RestaurantService } from "./application/restaurant-service.js";
 import { createApiHandler } from "./api/handler.js";
@@ -98,7 +98,22 @@ const server = createServer(async (request, response) => {
   const filePath = resolve(process.cwd(), "dist/web", requested);
   const webRoot = resolve(process.cwd(), "dist/web");
   try {
-    if (filePath !== webRoot && !filePath.startsWith(`${webRoot}/`)) throw new Error("Ruta inválida");
+    // Contencion de la ruta, cross-platform.
+    //
+    // Antes esto era `filePath.startsWith(webRoot + "/")`. En Windows
+    // `resolve()` devuelve la ruta con la barra invertida de Windows como
+    // separador, asi que comparar contra una ruta terminada en barra normal
+    // NUNCA daba true: todos los assets caian al fallback de index.html y el
+    // navegador
+    // rechazaba el modulo por MIME type ("Expected a JavaScript-or-Wasm module
+    // script but the server responded with text/html"). O sea: `npm start` no
+    // podia servir su propio frontend en Windows. En dev no se notaba porque
+    // los assets los sirve Vite.
+    //
+    // `relative()` normaliza los separadores; si el resultado sale del arbol
+    // empieza con ".." o es absoluto.
+    const dentro = relative(webRoot, filePath);
+    if (dentro !== "" && (dentro.startsWith("..") || isAbsolute(dentro))) throw new Error("Ruta inválida");
     const file = await readFile(filePath);
     response.writeHead(200, { "content-type": contentType(extname(filePath)) });
     response.end(file);
