@@ -1,0 +1,161 @@
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, resolve } from "node:path";
+import { HackathonExtensionsService } from "./application/hackathon-extensions-service.js";
+import { RestaurantService } from "./application/restaurant-service.js";
+import { createApiHandler } from "./api/handler.js";
+import { demoMenu } from "./config/demo-menu.js";
+import { InMemoryMenuCatalog, InMemorySessionRepository, systemClock, uuidGenerator } from "./infrastructure/in-memory.js";
+import { WdkCliCheckoutGateway } from "./infrastructure/wdk-cli-checkout-gateway.js";
+import { ResilientPaymentGateway, SimulatedFallbackGateway, WdkPolicySimulationGateway } from "./infrastructure/wdk-policy-gateway.js";
+import { AsistenteQvacSdk, type DescriptorModelo } from "./infrastructure/qvac-sdk-assistant.js";
+
+const arsPerUsdt = Number(process.env.DEMO_ARS_PER_USDT ?? 1_000);
+const paymentGateway = new ResilientPaymentGateway(
+  new WdkPolicySimulationGateway({
+    merchantAddress: process.env.WDK_DEMO_MERCHANT_ADDRESS ?? "0x1111111111111111111111111111111111111111",
+    tokenAddress: "0xd077a400968890eacc75cdc901f0356c943e4fdb",
+    arsPerUsdt,
+    maxUsdtInBaseUnits: BigInt(process.env.WDK_DEMO_MAX_USDT_BASE_UNITS ?? 25_000_000),
+  }),
+  new SimulatedFallbackGateway(),
+);
+
+const sessions = new InMemorySessionRepository();
+const menu = new InMemoryMenuCatalog(demoMenu);
+const service = new RestaurantService(sessions, menu, systemClock, uuidGenerator, paymentGateway);
+const checkoutWallet = new WdkCliCheckoutGateway({
+  clientWallet: process.env.WDK_CLIENT_WALLET ?? "mesa-cliente-demo",
+  businessWallet: process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo",
+  arsPerUsdt,
+  ...(process.env.WDK_CLI_BIN ? { executable: process.env.WDK_CLI_BIN } : {}),
+  ...(process.env.WDK_CLI_TOKEN ? { tokenTicker: process.env.WDK_CLI_TOKEN } : {}),
+});
+const extensions = new HackathonExtensionsService(sessions, menu, systemClock, uuidGenerator, paymentGateway, checkoutWallet);
+
+// ── QVAC: la IA local ───────────────────────────────────────────────────────
+//
+//   QVAC_MODE=sdk       (por defecto) el modelo lo carga esta misma app con
+//                       @qvac/sdk. No hay servidor que levantar aparte.
+//   QVAC_MODE=http      el adaptador contra `qvac serve openai`.
+//   QVAC_MODE=apagado   sin IA: el asistente responde con el motor
+//                       determinista y la pantalla lo aclara.
+//
+// Cual modelo: se midieron dos con 60 llamadas cada uno
+// (scripts/confiabilidad-qvac.mjs):
+//
+//                        dieta ok  sin repetir  sin copiar  mediana
+//   LLAMA_3_2_1B_INST     100%        92%          93%       3,4 s
+//   QWEN3_4B_INST_Q4_K_M  100%       100%         100%      10,4 s
+//
+// Va el 4B: 60 de 60 en todas las de confiabilidad. Con
+// QVAC_MODELO_SDK=LLAMA_3_2_1B_INST_Q4_0 se vuelve al chico, que sigue siendo
+// 100% seguro en restricciones y va tres veces mas rapido.
+const qvacMode = process.env.QVAC_MODE ?? "sdk";
+const qvacModelo = process.env.QVAC_MODELO_SDK ?? "QWEN3_4B_INST_Q4_K_M";
+
+let asistente: AsistenteQvacSdk | null = null;
+if (qvacMode === "sdk") {
+  const registro = (await import("@qvac/sdk")) as unknown as Record<string, DescriptorModelo>;
+  const descriptor = registro[qvacModelo];
+  if (!descriptor) {
+    console.error(`
+  QVAC_MODELO_SDK="${qvacModelo}" no existe en el registro de @qvac/sdk.`);
+    process.exit(1);
+  }
+  asistente = new AsistenteQvacSdk(descriptor, {
+    device: process.env.QVAC_DEVICE ?? "cpu",
+    // 4096 y no 2048: el prompt lleva la carta entera mas un ejemplo de dos
+    // turnos. Con la carta de demo sobra, pero una carta de restaurante real
+    // tiene cincuenta platos y desborda el contexto.
+    ctxSize: Number(process.env.QVAC_CTX ?? 4096),
+  });
+
+  // Se carga ANTES de escuchar: si el arranque dice "cargado", es verdad.
+  // Con el modelo ya en ~/.qvac/models son ~10 s; la primera vez lo baja, y por
+  // eso se avisa el progreso: 2,5 GB en silencio parece que se colgo.
+  console.log(`Cargando modelo local (${asistente.modeloUsado})...`);
+  let ultimoAviso = -1;
+  const listo = await asistente.arrancar((pct, bajados, total) => {
+    const escalon = Math.floor(pct / 10);
+    if (escalon === ultimoAviso) return;
+    ultimoAviso = escalon;
+    console.log(`  bajando ${pct.toFixed(0)}% (${(bajados / 1e6).toFixed(0)}/${(total / 1e6).toFixed(0)} MB)`);
+  });
+  if (!listo) {
+    console.warn(`QVAC no cargo: ${asistente.estado().fallo}`);
+    console.warn("El asistente responde con el motor determinista y la pantalla lo aclara.");
+    asistente = null;
+  }
+}
+
+const port = Number(process.env.PORT ?? 3000);
+const apiHandler = createApiHandler(service, extensions, asistente);
+const server = createServer(async (request, response) => {
+  const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (pathname === "/health" || pathname.startsWith("/api/")) return apiHandler(request, response);
+  const requested = pathname === "/" ? "index.html" : pathname.slice(1);
+  const filePath = resolve(process.cwd(), "dist/web", requested);
+  const webRoot = resolve(process.cwd(), "dist/web");
+  try {
+    if (filePath !== webRoot && !filePath.startsWith(`${webRoot}/`)) throw new Error("Ruta inválida");
+    const file = await readFile(filePath);
+    response.writeHead(200, { "content-type": contentType(extname(filePath)) });
+    response.end(file);
+  } catch {
+    try {
+      const index = await readFile(resolve(webRoot, "index.html"));
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(index);
+    } catch {
+      response.writeHead(503, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: { code: "WEB_NOT_BUILT", message: "Ejecutá npm run build:web." } }));
+    }
+  }
+});
+
+server.listen(port, () => {
+  console.log(`Mesa Abierta API disponible en http://localhost:${port}`);
+  console.log("Datos de pedidos en memoria: se reinician al detener el servidor.");
+  console.log(`WDK CLI: cliente=${process.env.WDK_CLIENT_WALLET ?? "mesa-cliente-demo"} negocio=${process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo"} red=Sepolia`);
+  if (asistente) {
+    const e = asistente.estado();
+    console.log(`QVAC local: ${e.modelo} · ${e.parametros} · ${e.cuantizacion} · ${e.device} · ctx ${e.ctxSize}`);
+    console.log("  salida restringida por gramatica: el modelo NO puede nombrar un plato fuera de la carta");
+  } else {
+    console.log(`QVAC local: apagado (QVAC_MODE=${qvacMode}) · el asistente usa el motor determinista`);
+  }
+});
+
+/**
+ * Apagado ordenado.
+ *
+ * No es cosmetica: si el proceso se muere sin bajar el worker de QVAC queda
+ * ~/.qvac/.worker.lock apuntando a un pid muerto y el arranque siguiente se
+ * cuelga 30 segundos. Perder eso en medio de una demo no se puede permitir.
+ */
+let cerrando = false;
+for (const senal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(senal, () => {
+    if (cerrando) return;
+    cerrando = true;
+    const salir = () => process.exit(0);
+    server.close();
+    if (asistente) {
+      asistente.cerrar().then(salir, salir);
+      setTimeout(salir, 3_000).unref();
+    } else salir();
+  });
+}
+
+function contentType(extension: string) {
+  const types: Record<string, string> = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+  };
+  return types[extension] ?? "application/octet-stream";
+}
