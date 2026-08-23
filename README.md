@@ -108,8 +108,13 @@ Paquete instalado:
 ```
 
 Sugerencias personalizadas a partir de lo que la persona ya pidió, con el modelo
-cargado **dentro del proceso de la app**. No hay servidor que levantar aparte,
-no hay clave de API en ningún lado, y no sale un byte a internet.
+cargado **dentro del proceso de la app**. No hay servidor que levantar aparte y
+no hay clave de API en ningún lado.
+
+Lo único que toca la red es la **descarga del modelo**, una sola vez, a
+`~/.qvac/models`. Después de eso la inferencia es enteramente local: ni el
+historial del cliente ni la carta salen de la máquina del local, y la app
+funciona con el cable desenchufado.
 
 Casi todo vive en un archivo: **[`app/src/infrastructure/recomendador-qvac-sdk.ts`](https://github.com/Onaai/Menu-Hackaton/blob/e2874b5560d8e34af0ab1f6baa8a2e4148d6a75a/app/src/infrastructure/recomendador-qvac-sdk.ts)**
 
