@@ -2,7 +2,11 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: sin esto, en un iPhone con notch la app no llega a los
+         bordes y queda una banda blanca arriba y abajo. Con esto llega, y las
+         barras fijas se separan con env(safe-area-inset-*) en el CSS. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#224d3b" />
     <meta name="description" content="Mesa Abierta: pedidos por QR y cuenta compartida." />
     <title>Mesa Abierta</title>

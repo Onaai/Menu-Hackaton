@@ -62,7 +62,16 @@ function herramientasDeterministas() {
     },
     async cotizarCobro(monto, destinatario) {
       llamadas.push(`cotizarCobro(${monto},${destinatario})`);
-      return { ok: true, texto: `vista previa lista: ${monto} USDT a mesa-negocio-demo. NO se transmitio: falta que una persona confirme.` };
+      // `datos` NO es opcional: el adaptador real (HerramientasWdkCli) devuelve
+      // ahi el preview de WDK, y es lo que hace que el agente sepa que quedo
+      // una cotizacion abierta y agregue la aclaracion de "todavia no se
+      // transmitio". Sin esto el doble de test no cumple el contrato del real y
+      // la metrica daba 0% por una falla mia, no del modelo.
+      return {
+        ok: true,
+        texto: `vista previa lista: ${monto} USDT a mesa-negocio-demo. NO se transmitio: falta que una persona confirme.`,
+        datos: { previewId: "preview-de-prueba", amount: String(monto), toWallet: "mesa-negocio-demo" },
+      };
     },
   };
 }

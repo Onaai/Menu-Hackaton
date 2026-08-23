@@ -90,5 +90,147 @@
    no se confunda con "bajar uno". 34px de lado: es un boton chico en una
    pantalla tactil, y de menos no se acierta. */
 .cart-line{position:relative;align-items:center;gap:8px}
-.quitar-linea{flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;transition:.15s}
-.quitar-linea:hover{border-color:var(--red);background:var(--red-soft);color:var(--red)}
+.cart-line .quitar-linea{flex:0 0 auto;width:34px;height:34px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--muted);font-size:17px;line-height:1;cursor:pointer;transition:.15s}
+.cart-line .quitar-linea:hover{border-color:var(--red);background:var(--red-soft);color:var(--red)}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MÓVIL
+
+   Es una app de celular: el comensal la usa parado, con una mano, con la mesa
+   servida y poca paciencia. Todo lo de abajo sale de eso.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 700px) {
+
+  /* 1 · El zoom de iOS al tocar un input.
+     Safari hace zoom automatico cuando el campo enfocado tiene menos de 16px,
+     y despues la pagina queda corrida y hay que pellizcar para volver. Es el
+     bug movil mas comun y no se ve nunca desde una compu. 16px exactos. */
+  input, textarea, select { font-size: 16px !important; }
+
+  /* 2a · El desborde de la grilla.
+     `grid-template-columns:1fr` no baja del ancho minimo de su contenido: los
+     items de grilla traen `min-width:auto`. Medido, la columna quedaba de
+     431px adentro de un viewport de 375 y la mitad derecha de la pantalla se
+     cortaba — tapado por el overflow-x:hidden de abajo, que es justamente por
+     lo que un bug asi sobrevive hasta la demo. `minmax(0,1fr)` le da permiso a
+     encogerse. */
+  .customer-layout, .my-order-page, .kitchen-page { grid-template-columns: minmax(0, 1fr); }
+  .menu-grid, .ticket-grid { grid-template-columns: minmax(0, 1fr); }
+  .menu-card { grid-template-columns: 84px minmax(0, 1fr); }
+  .menu-column, .cart, .welcome-row, .menu-grid, .menu-card, .dish-copy,
+  .orders-panel, .agente-panel, .ticket { min-width: 0; }
+
+  /* 2 · Que nada empuje la pagina a lo ancho. Una sola linea larga —una
+     direccion 0x, un hash— hace scroll horizontal en TODA la app. */
+  html, body { overflow-x: hidden; }
+  .agente-traza code, .paso-resultado, .assistant-answer small,
+  .agente-alcance, .wallet-line, .ticket li span { overflow-wrap: anywhere; }
+
+  /* 2b · Las categorias se deslizan, no se envuelven.
+     Cinco chips no entran en 375px. Envolverlas come tres renglones arriba del
+     menu; deslizarlas es lo que espera cualquiera en un celu. El margen
+     negativo las hace sangrar hasta el borde de la pantalla, que es la senal
+     de que hay mas a la derecha. */
+  .categories, .kitchen-filters {
+    flex-wrap: nowrap; overflow-x: auto; scroll-snap-type: x proximity;
+    margin-inline: -14px; padding-inline: 14px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .categories::-webkit-scrollbar, .kitchen-filters::-webkit-scrollbar { display: none }
+  .categories button, .kitchen-filters button { flex: 0 0 auto; scroll-snap-align: start }
+
+  /* 3 · Areas de toque. Menos de 44px se falla seguido, y en el carrito
+     fallar significa borrar el plato equivocado. */
+  .counter button, .quitar-linea, .llamadas-lista button,
+  .assistant-diets .diet, .agente-sugeridas button { min-height: 44px; }
+  .counter button { min-width: 44px; }
+  /* `.cart-line button` ya existia con font-size:9px y le gana a `.quitar-linea`
+     por especificidad: el boton salia de 5px de ancho y con la x ilegible. Se
+     empata la especificidad en vez de tirar un !important. */
+  .cart-line .quitar-linea { width: 44px; height: 44px; font-size: 22px; }
+
+  /* 4 · La barra fija del carrito, arriba de la barra del iPhone. Sin esto
+     queda justo abajo del indicador y se toca sin querer al deslizar. */
+  .mobile-cart {
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    min-height: 54px; align-items: center;
+  }
+  .customer-layout, .my-order-page, .kitchen-page {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+  .topbar { padding-top: env(safe-area-inset-top); height: calc(64px + env(safe-area-inset-top)); }
+
+  /* 5 · Los dialogos. En un celu tienen que poder scrollear y no pasarse de
+     alto: el asistente con tres sugerencias y los descartes no entra. */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .assistant-dialog, .food-dialog, .bill-dialog {
+    width: 100%; max-width: 100%;
+    max-height: 88vh; overflow-y: auto;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    /* Nace desde abajo, que es de donde el pulgar espera que salga. */
+    animation: subir .22s ease-out;
+  }
+  @keyframes subir { from { transform: translateY(14px); opacity: .6 } to { transform: none; opacity: 1 } }
+  .assistant-dialog h2, .food-dialog h2, .bill-dialog h2 { font-size: 27px }
+  .close { width: 44px; height: 44px; }
+
+  /* 6 · Las acciones de arriba: llamar al mozo, asistente y mi pedido. En
+     fila se aprietan a tres columnas de 100px y no se lee ninguna. */
+  /* `.welcome-row` es flex en fila: las acciones quedaban de 92px cada una en
+     una pantalla de 375. En columna, el bloque toma el ancho completo. */
+  .welcome-row { flex-direction: column; gap: 14px; }
+  .welcome-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .welcome-actions .order-shortcut { grid-column: 1 / -1; justify-content: space-between; }
+  .llamar-mozo, .assistant-launch { justify-content: center; text-align: center; padding: 12px 10px; }
+  .welcome-row h1 { font-size: 34px }
+
+  /* 7 · El carrito. En el celu va abajo del menu, asi que el titulo tiene que
+     separarse o parece parte del ultimo plato. */
+  .cart { margin-top: 18px; border-top: 3px solid var(--line); }
+  .cart-line { flex-wrap: nowrap; gap: 8px }
+  /* Sin `min-width:0` un hijo flex no baja de su contenido y la linea se pasa
+     del ancho de la pantalla: medido, 393px adentro de un viewport de 375. */
+  .cart-line > div { min-width: 0; flex: 1 1 auto }
+  .cart-line > strong { flex: 0 0 auto; white-space: nowrap }
+  .cart-line span { overflow-wrap: anywhere }
+
+  /* 8 · El asistente del menu. */
+  .assistant-diets { gap: 7px }
+  .assistant-ask { flex-direction: column }
+  .assistant-ask button { padding: 13px; width: 100% }
+  .assistant-prompts { display: grid; gap: 6px }
+  .assistant-prompts button { text-align: left; padding: 12px }
+  .assistant-items .motivo { font-size: 12px }
+
+  /* 9 · Cocina y caja en celular: el encargado tambien anda con el telefono. */
+  .ticket-grid { gap: 10px }
+  .cronometro { font-size: 20px }
+  .llamadas-lista { display: grid }
+  .llamadas-lista button { width: 100%; justify-content: space-between }
+  .agente-panel { padding: 15px; border-radius: 14px }
+  .agente-ask { flex-direction: column }
+  .agente-ask button { padding: 13px; width: 100% }
+  .agente-sugeridas { display: grid; gap: 6px }
+  .agente-sugeridas button { text-align: left; padding: 11px }
+  .agente-politicas { gap: 5px }
+  .agente-politicas span { flex: 1 1 46%; text-align: center }
+  .agente-traza li { padding: 10px }
+  .finance-strip { grid-template-columns: 1fr 1fr }
+}
+
+/* Pantallas muy angostas (iPhone SE y parecidos). */
+/* Fuera del bloque de arriba a proposito: un @media anidado hace que el
+   compilador de CSS parta el bloque padre en dos, y las reglas que quedan del
+   otro lado se vuelven dificiles de seguir. */
+@media (prefers-reduced-motion: reduce) {
+  .assistant-dialog, .food-dialog, .bill-dialog { animation: none }
+}
+
+@media (max-width: 380px) {
+  .welcome-row h1 { font-size: 29px }
+  .assistant-dialog h2, .food-dialog h2 { font-size: 24px }
+  .agente-politicas span { flex: 1 1 100% }
+  .finance-strip { grid-template-columns: 1fr }
+}
