@@ -189,7 +189,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, () => {
-  console.log(`Mesa Abierta API disponible en http://localhost:${port}`);
+  console.log(`Al Toque · API disponible en http://localhost:${port}`);
   console.log("Datos de pedidos en memoria: se reinician al detener el servidor.");
   console.log(`WDK CLI: cliente=${walletCliente} negocio=${walletNegocio} red=Sepolia`);
   if (wdkSimulado) {

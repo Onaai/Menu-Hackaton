@@ -30,7 +30,7 @@ export default function App() {
 }
 
 function Header({ kitchen, orderView, tableNumber, navigate }: { kitchen: boolean; orderView: boolean; tableNumber: number; navigate: (path: string) => void }) {
-  return <header className="topbar"><button className="brand" onClick={() => navigate(kitchen ? "/cocina" : `/mesa/${tableNumber}`)}><span className="brand-mark">M</span><span>Mesa Abierta</span></button>{/* La chapita de mesa solo tiene sentido del lado del comensal: en la
+  return <header className="topbar"><button className="brand" onClick={() => navigate(kitchen ? "/cocina" : `/mesa/${tableNumber}`)}><span className="brand-mark">A</span><span>Al Toque</span></button>{/* La chapita de mesa solo tiene sentido del lado del comensal: en la
          pantalla del local se ven TODAS las mesas, asi que decir "Mesa 12"
          arriba es informacion falsa. El 12 sale de la ruta por defecto, no de
          nada real. */}
@@ -717,6 +717,6 @@ function LogoMercadoPago({ grande = false }: { grande?: boolean }) {
     onError={() => setIntento((n) => n + 1)} />;
 }
 
-function StateCard({ title, text }: { title: string; text: string }) { return <main className="state-wrap"><section><span className="brand-mark">M</span><h1>{title}</h1><p>{text}</p></section></main>; }
+function StateCard({ title, text }: { title: string; text: string }) { return <main className="state-wrap"><section><span className="brand-mark">A</span><h1>{title}</h1><p>{text}</p></section></main>; }
 function shortAddress(value: string) { return value ? `${value.slice(0, 6)}…${value.slice(-4)}` : ""; }
 function messageOf(cause: unknown) { return cause instanceof Error ? cause.message : "Ocurrió un error inesperado."; }
