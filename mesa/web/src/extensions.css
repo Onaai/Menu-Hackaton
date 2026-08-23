@@ -52,3 +52,34 @@
 .chip-bloqueado{background:var(--amber);color:#fff;border-radius:999px;padding:2px 8px;font-size:9px;font-weight:800}
 .paso-pensamiento{margin-top:5px;color:var(--muted);font-size:11px;font-style:italic;line-height:1.45}
 .paso-resultado{margin-top:4px;font-size:11px;line-height:1.5}
+
+/* ── Cronometro de comanda ───────────────────────────────────────────────────
+   Los umbrales son de cocina: a los 10 minutos una comanda esta demorada, a
+   los 20 hay que ir a ver que paso. */
+.ticket-tiempo{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.cronometro{font-variant-numeric:tabular-nums;font-weight:800;font-size:17px;letter-spacing:-.01em;color:var(--navy)}
+.cronometro.demorado{color:var(--amber)}
+.cronometro.tarde{color:var(--red);animation:latir 1.6s ease-in-out infinite}
+.cronometro.listo{color:var(--muted);font-weight:700}
+@keyframes latir{0%,100%{opacity:1}50%{opacity:.45}}
+@media (prefers-reduced-motion: reduce){.cronometro.tarde{animation:none}}
+.ticket-tiempo time{color:var(--muted);font-size:10px}
+
+/* ── Llamadas al mozo ───────────────────────────────────────────────────────
+   Va arriba de todo: una comanda demorada se ve en la grilla, pero alguien
+   esperando con la mano levantada no aparece en ningun lado si esto no esta. */
+.llamadas-strip{margin:14px 0;padding:14px 16px;border:1px solid var(--amber);border-radius:16px;background:var(--amber-soft)}
+.llamadas-titulo{display:block;color:var(--amber);font-size:11px;font-weight:800;letter-spacing:.04em;margin-bottom:9px}
+.llamadas-lista{display:flex;flex-wrap:wrap;gap:8px}
+.llamadas-lista button{display:flex;align-items:center;gap:9px;border:1px solid #e8c98c;border-radius:11px;background:#fff;padding:9px 13px;cursor:pointer;text-align:left}
+.llamadas-lista button strong{font-size:12px}
+.llamadas-lista button span{color:var(--muted);font-size:11px}
+.llamadas-lista button small{color:var(--green);font-size:10px;font-weight:800}
+
+/* ── Boton de llamar al mozo ────────────────────────────────────────────── */
+.llamar-mozo{border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.llamar-mozo:hover{border-color:var(--amber);background:var(--amber-soft);color:var(--amber)}
+.motivos-mozo{display:grid;gap:7px;margin-top:12px}
+.motivos-mozo button{border:1px solid var(--line);border-radius:11px;background:#fff;padding:13px;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+.motivos-mozo button:hover{border-color:var(--navy);background:var(--blue-soft)}
+.motivos-mozo button:disabled{opacity:.5;cursor:not-allowed}

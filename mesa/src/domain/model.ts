@@ -101,8 +101,21 @@ export interface TableSession {
   orders: Order[];
   payments: PaymentRecord[];
   paymentMode?: PaymentMode;
+  /** Pedidos de atencion humana. Se atienden desde la pantalla del local. */
+  llamadas: LlamadaAlMozo[];
   openedAt: string;
   updatedAt: string;
+}
+
+export interface LlamadaAlMozo {
+  id: string;
+  dinerId: string;
+  dinerName: string;
+  /** "la cuenta", "una consulta", "algo mas". Corto y de una lista cerrada. */
+  motivo: string;
+  creadaEn: string;
+  /** Cuando alguien del local la marco como atendida. */
+  atendidaEn?: string;
 }
 
 export interface DinerBill {

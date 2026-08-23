@@ -25,3 +25,5 @@ export interface PasoTraza { numero: number; pensamiento: string; accion: string
 export interface RespuestaAgente { respuesta: string; traza: PasoTraza[]; cierre: "respondio" | "sin-pasos" | "sin-modelo"; cotizacion: unknown | null; latenciaTotalMs: number; }
 export interface PoliticasAgente { topePorOperacion: number; topeDiario: number; destinatariosPermitidos: string[]; maxPasos: number; }
 export interface EstadoAgente { politicas?: PoliticasAgente; gastadoHoy?: number; disponibleHoy?: number; dia?: string; accionesDelAgente?: string[]; transmitir?: string; disponible?: boolean; motivo?: string; }
+
+export interface LlamadaPendiente { id: string; dinerId: string; dinerName: string; motivo: string; creadaEn: string; atendidaEn?: string; sessionId: string; tableNumber: number; }

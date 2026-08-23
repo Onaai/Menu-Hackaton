@@ -2,6 +2,7 @@ import { assertDomain, DomainError } from "../domain/errors.js";
 import type {
   BillSummary,
   KitchenOrderView,
+  LlamadaAlMozo,
   Order,
   OrderStatus,
   PaymentMode,
@@ -10,6 +11,18 @@ import type {
 } from "../domain/model.js";
 import type { Clock, IdGenerator, MenuCatalog, SessionRepository } from "./ports.js";
 import type { PaymentEvaluation, PaymentGateway, PaymentIntent } from "./payment-gateway.js";
+
+/**
+ * Cuantas comandas sin entregar puede acumular un mismo comensal.
+ *
+ * Tres es lo que entra en una mesa de verdad: entrada, principal y algo mas.
+ * El cuarto pedido sin que llegue ninguno de los tres anteriores no es un
+ * comensal con hambre, es alguien que se fue y esta jugando con la app.
+ */
+export const MAX_COMANDAS_PENDIENTES = 3;
+
+/** Lista cerrada: el motivo no es texto libre que despues hay que moderar. */
+export const MOTIVOS_DE_LLAMADA = ["necesito algo", "la cuenta", "una consulta", "algo se derramo"];
 
 export interface PlaceOrderInput {
   dinerId: string;
@@ -56,6 +69,7 @@ export class RestaurantService {
       diners: [],
       orders: [],
       payments: [],
+      llamadas: [],
       openedAt: now,
       updatedAt: now,
     };
@@ -92,6 +106,29 @@ export class RestaurantService {
     assertDomain(session.status === "OPEN", "INVALID_STATE", "La cuenta está solicitada o cerrada; no se pueden agregar productos.");
     assertDomain(session.diners.some((diner) => diner.id === input.dinerId), "NOT_FOUND", "El comensal no pertenece a esta mesa.");
     assertDomain(input.items.length > 0, "VALIDATION_ERROR", "El pedido debe contener al menos un producto.");
+
+    // Tope de comandas sin entregar por comensal.
+    //
+    // El caso que esto ataja: alguien escanea el QR, se va del restaurante y
+    // desde su casa manda cuarenta pedidos. La mesa sigue abierta —el local
+    // todavia no la cerro— asi que el chequeo de `status` no lo frena.
+    //
+    // Un link dinamico que vence NO resuelve esto: el QR apunta a /mesa/12, y
+    // volver a abrir esa URL entrega un token nuevo. Sirve para que un link
+    // reenviado por WhatsApp no viva para siempre, no para el que ya entro.
+    //
+    // Lo que si lo resuelve es que la autorizacion no sea el QR sino la
+    // sesion de mesa, que abre y cierra el local, mas este tope: no podes
+    // encolar mas de N comandas sin que la cocina te vaya entregando. Ademas
+    // de frenar el abuso, refleja como funciona un restaurante de verdad.
+    const pendientes = session.orders.filter(
+      (order) => order.dinerId === input.dinerId && order.status !== "DELIVERED",
+    ).length;
+    assertDomain(
+      pendientes < MAX_COMANDAS_PENDIENTES,
+      "CONFLICT",
+      `Tenés ${pendientes} pedidos todavía sin entregar. Esperá a que la cocina te los traiga, o llamá al mozo.`,
+    );
 
     const consolidated = new Map<string, { quantity: number; note?: string }>();
     for (const item of input.items) {
@@ -130,6 +167,61 @@ export class RestaurantService {
     session.orders.push(order);
     await this.touchAndSave(session);
     return order;
+  }
+
+  /**
+   * El comensal pide que venga alguien.
+   *
+   * Existe porque hay cosas que una app no resuelve —un vaso roto, una
+   * consulta sobre un plato, pedir la cuenta en efectivo— y porque sin esto la
+   * unica forma de llamar a alguien es levantar la mano y esperar.
+   *
+   * Una llamada activa por comensal: si toca el boton diez veces, sigue
+   * habiendo una sola. No es solo anti-abuso, es que diez avisos identicos en
+   * la pantalla del local son diez avisos que nadie mira.
+   */
+  async llamarAlMozo(sessionId: string, dinerId: string, motivo: string) {
+    const session = await this.requireSession(sessionId);
+    assertDomain(session.status !== "CLOSED", "INVALID_STATE", "La mesa ya está cerrada.");
+    const diner = session.diners.find((candidate) => candidate.id === dinerId);
+    assertDomain(diner, "NOT_FOUND", "El comensal no pertenece a esta mesa.");
+    assertDomain(MOTIVOS_DE_LLAMADA.includes(motivo), "VALIDATION_ERROR", "Ese motivo no está en la lista.");
+
+    const yaLlamo = session.llamadas.find((llamada) => llamada.dinerId === dinerId && !llamada.atendidaEn);
+    if (yaLlamo) return { llamada: yaLlamo, yaEstaba: true };
+
+    const llamada: LlamadaAlMozo = {
+      id: this.ids.next("llamada"),
+      dinerId,
+      dinerName: diner.name,
+      motivo,
+      creadaEn: this.clock.now().toISOString(),
+    };
+    session.llamadas.push(llamada);
+    await this.touchAndSave(session);
+    return { llamada, yaEstaba: false };
+  }
+
+  /** Desde la pantalla del local: alguien fue a la mesa. */
+  async atenderLlamada(sessionId: string, llamadaId: string) {
+    const session = await this.requireSession(sessionId);
+    const llamada = session.llamadas.find((candidate) => candidate.id === llamadaId);
+    assertDomain(llamada, "NOT_FOUND", "No se encontró la llamada.");
+    if (!llamada.atendidaEn) {
+      llamada.atendidaEn = this.clock.now().toISOString();
+      await this.touchAndSave(session);
+    }
+    return llamada;
+  }
+
+  /** Las llamadas sin atender de todas las mesas, la mas vieja primero. */
+  async listarLlamadasPendientes() {
+    const sessions = await this.sessions.list();
+    return sessions
+      .flatMap((session) => session.llamadas
+        .filter((llamada) => !llamada.atendidaEn)
+        .map((llamada) => ({ ...llamada, sessionId: session.id, tableNumber: session.tableNumber })))
+      .sort((a, b) => a.creadaEn.localeCompare(b.creadaEn));
   }
 
   async listKitchenOrders(status?: OrderStatus): Promise<KitchenOrderView[]> {

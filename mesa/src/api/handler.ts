@@ -108,6 +108,16 @@ export function createApiHandler(
           const body = await readJson<{ dinerId: string }>(request);
           return json(response, 200, await extensions.removeOrderItem(sessionId, parts[4], body.dinerId, parts[6]));
         }
+        // La mas especifica primero: /llamadas/:id/atender tambien tiene
+        // parts[3] === "llamadas", asi que si la creacion va antes sin mirar el
+        // largo, se come la ruta de atender y nunca se llega.
+        if (method === "POST" && parts[3] === "llamadas" && parts[4] && parts[5] === "atender") {
+          return json(response, 200, await service.atenderLlamada(sessionId, parts[4]));
+        }
+        if (method === "POST" && parts[3] === "llamadas" && parts.length === 4) {
+          const body = await readJson<{ dinerId: string; motivo: string }>(request);
+          return json(response, 201, await service.llamarAlMozo(sessionId, body.dinerId, body.motivo));
+        }
         if (method === "POST" && parts[3] === "bill" && parts[4] === "request") {
           const body = await readJson<{ confirmed: boolean }>(request);
           return json(response, 200, await service.requestBill(sessionId, body.confirmed));
@@ -140,7 +150,18 @@ export function createApiHandler(
         const rawStatus = url.searchParams.get("status");
         const status = rawStatus && orderStatuses.has(rawStatus as OrderStatus) ? rawStatus as OrderStatus : undefined;
         if (rawStatus && !status) throw new DomainError("VALIDATION_ERROR", "El estado de comanda no es válido.");
-        return json(response, 200, { orders: await service.listKitchenOrders(status) });
+        // `ahora` viaja con las comandas para el cronometro de la pantalla.
+        //
+        // Sin esto el navegador calcularia el tiempo transcurrido con SU reloj
+        // contra un createdAt del servidor, y una tablet de cocina desfasada
+        // dos minutos mostraria dos minutos de mas en cada comanda. Con el
+        // ahora del servidor, el navegador calcula el desfasaje una vez y todas
+        // las pantallas muestran lo mismo.
+        return json(response, 200, {
+          orders: await service.listKitchenOrders(status),
+          ahora: new Date().toISOString(),
+          llamadas: await service.listarLlamadasPendientes(),
+        });
       }
       if (method === "PATCH" && parts[0] === "api" && parts[1] === "kitchen" && parts[2] === "orders" && parts[3] && parts[4] === "status") {
         const body = await readJson<{ status: OrderStatus }>(request);
