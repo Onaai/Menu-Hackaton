@@ -35,7 +35,11 @@ const walletNegocio = process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo";
 // recorrido sin fondear Sepolia. NO es el valor por defecto, y cuando esta
 // activo se grita: en la terminal, en GET /api/config y en la pantalla del
 // checkout. Ver wdk-cli-simulado.ts.
-const wdkSimulado = process.env.WDK_CLI_MODE === "simulado";
+// `.trim()` y no una comparacion pelada: en cmd de Windows,
+// `set WDK_CLI_MODE=simulado && npm start` guarda "simulado " CON el espacio
+// de antes del &&, y la comparacion exacta daba false. El modo simulado no se
+// activaba y no habia forma de darse cuenta mirando el comando.
+const wdkSimulado = (process.env.WDK_CLI_MODE ?? "").trim() === "simulado";
 const runnerSimulado = wdkSimulado
   ? crearWdkCliSimulado({
       saldos: {
@@ -72,8 +76,8 @@ const extensions = new HackathonExtensionsService(sessions, menu, systemClock, u
 // Va el 4B: 60 de 60 en todas las de confiabilidad. Con
 // QVAC_MODELO_SDK=LLAMA_3_2_1B_INST_Q4_0 se vuelve al chico, que sigue siendo
 // 100% seguro en restricciones y va tres veces mas rapido.
-const qvacMode = process.env.QVAC_MODE ?? "sdk";
-const qvacModelo = process.env.QVAC_MODELO_SDK ?? "QWEN3_4B_INST_Q4_K_M";
+const qvacMode = (process.env.QVAC_MODE ?? "sdk").trim();
+const qvacModelo = (process.env.QVAC_MODELO_SDK ?? "QWEN3_4B_INST_Q4_K_M").trim();
 
 let asistente: AsistenteQvacSdk | null = null;
 if (qvacMode === "sdk") {
