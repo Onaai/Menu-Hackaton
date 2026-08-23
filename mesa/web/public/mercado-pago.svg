@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 372 126" role="img" aria-label="Mercado Pago">
+  <!--
+    Marcador de posición del logo de Mercado Pago, dibujado a mano.
+
+    Si guardás el archivo oficial como `mercado-pago.png` en esta misma
+    carpeta, el componente lo usa a él y este SVG queda sin uso: la etiqueta
+    <img> apunta primero al PNG y sólo cae acá si no existe.
+
+    Se sirve desde el disco y no desde internet a propósito: el resto de la app
+    corre sin red —el modelo es local, la billetera es local— y en el wifi de
+    un evento un logo hotlinkeado es justo lo que no carga mientras grabás.
+  -->
+  <g>
+    <ellipse cx="62" cy="63" rx="56" ry="46" fill="#4EBEF3" stroke="#141F6E" stroke-width="7"/>
+    <path d="M18 55 C34 44, 52 44, 66 52 C74 57, 84 57, 92 52 C98 48, 104 47, 108 48"
+          fill="none" stroke="#FFFFFF" stroke-width="15" stroke-linecap="round"/>
+    <path d="M40 62 C50 56, 58 57, 64 62 L78 71 C82 74, 82 79, 78 82 C75 85, 70 85, 67 82 L58 76"
+          fill="#FFFFFF" stroke="#141F6E" stroke-width="4.5" stroke-linejoin="round"/>
+    <g fill="#FFFFFF" stroke="#141F6E" stroke-width="4">
+      <circle cx="36" cy="76" r="6.5"/>
+      <circle cx="46" cy="80" r="6.5"/>
+      <circle cx="56" cy="83" r="6.5"/>
+    </g>
+  </g>
+  <g fill="#141F6E" font-family="DM Sans, Segoe UI, Helvetica, Arial, sans-serif" font-weight="700">
+    <text x="146" y="60" font-size="46" letter-spacing="-1">mercado</text>
+    <text x="146" y="108" font-size="46" letter-spacing="-1">pago</text>
+  </g>
+</svg>

@@ -28,6 +28,12 @@ export function createApiHandler(
       // herramienta de WDK CLI usar. Devuelve la traza completa: que penso,
       // que herramienta llamo, que le contesto, y si alguna politica lo freno.
       // Sin la traza esto seria una caja negra que mueve plata.
+      // Que el checkout sea simulado viaja a la pantalla: un pago de mentira
+      // que se hace pasar por real es lo que un jurado tiene que poder
+      // descartar de un vistazo.
+      if (method === "GET" && url.pathname === "/api/config") {
+        return json(response, 200, { wdkSimulado: process.env.WDK_CLI_MODE === "simulado" });
+      }
       if (method === "GET" && url.pathname === "/api/agente") {
         return json(response, 200, agente ? agente.estado() : { disponible: false, motivo: "el modelo local no esta cargado" });
       }

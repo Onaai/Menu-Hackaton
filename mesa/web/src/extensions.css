@@ -299,3 +299,16 @@
 .corte-grid .cajon span{color:var(--green)}
 .corte-caja > small{display:block;margin-top:9px;color:var(--muted);font-size:10px;line-height:1.55}
 @media (max-width:700px){.corte-grid{grid-template-columns:1fr 1fr}}
+
+/* El destinatario en vez del saldo ajeno: el cliente ve a quien le paga, no
+   cuanta plata tiene el restaurante. */
+.wallet-mini b.destino{color:var(--muted);font-weight:700;font-size:10px;letter-spacing:.03em}
+.vuelto.grande{margin:14px 0}
+.vuelto.grande strong{font-size:38px}
+
+/* El cartel de checkout simulado. Ambar y visible: si el pago no es real, eso
+   no puede estar escondido en un README. */
+.aviso-simulado{display:flex;flex-direction:column;gap:4px;margin:12px 0;padding:12px 14px;border:1px solid var(--amber);border-radius:12px;background:var(--amber-soft)}
+.aviso-simulado b{color:var(--amber);font-size:11px;letter-spacing:.03em}
+.aviso-simulado span{color:var(--ink);font-size:11px;line-height:1.55}
+.aviso-simulado code{background:#fff;border-radius:4px;padding:1px 5px;font-size:10px}

@@ -7,6 +7,7 @@ import { createApiHandler } from "./api/handler.js";
 import { demoMenu } from "./config/demo-menu.js";
 import { InMemoryMenuCatalog, InMemorySessionRepository, systemClock, uuidGenerator } from "./infrastructure/in-memory.js";
 import { WdkCliCheckoutGateway } from "./infrastructure/wdk-cli-checkout-gateway.js";
+import { crearWdkCliSimulado } from "./infrastructure/wdk-cli-simulado.js";
 import { ResilientPaymentGateway, SimulatedFallbackGateway, WdkPolicySimulationGateway } from "./infrastructure/wdk-policy-gateway.js";
 import { AsistenteQvacSdk, type DescriptorModelo } from "./infrastructure/qvac-sdk-assistant.js";
 import { AgenteCaja, type PoliticasAgente } from "./application/agente-caja.js";
@@ -27,13 +28,30 @@ const paymentGateway = new ResilientPaymentGateway(
 const sessions = new InMemorySessionRepository();
 const menu = new InMemoryMenuCatalog(demoMenu);
 const service = new RestaurantService(sessions, menu, systemClock, uuidGenerator, paymentGateway);
+const walletCliente = process.env.WDK_CLIENT_WALLET ?? "mesa-cliente-demo";
+const walletNegocio = process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo";
+
+// WDK_CLI_MODE=simulado enchufa un CLI de mentira para poder demostrar el
+// recorrido sin fondear Sepolia. NO es el valor por defecto, y cuando esta
+// activo se grita: en la terminal, en GET /api/config y en la pantalla del
+// checkout. Ver wdk-cli-simulado.ts.
+const wdkSimulado = process.env.WDK_CLI_MODE === "simulado";
+const runnerSimulado = wdkSimulado
+  ? crearWdkCliSimulado({
+      saldos: {
+        [walletCliente]: Number(process.env.WDK_SALDO_CLIENTE ?? 100),
+        [walletNegocio]: Number(process.env.WDK_SALDO_NEGOCIO ?? 0),
+      },
+    })
+  : undefined;
+
 const checkoutWallet = new WdkCliCheckoutGateway({
-  clientWallet: process.env.WDK_CLIENT_WALLET ?? "mesa-cliente-demo",
-  businessWallet: process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo",
+  clientWallet: walletCliente,
+  businessWallet: walletNegocio,
   arsPerUsdt,
   ...(process.env.WDK_CLI_BIN ? { executable: process.env.WDK_CLI_BIN } : {}),
   ...(process.env.WDK_CLI_TOKEN ? { tokenTicker: process.env.WDK_CLI_TOKEN } : {}),
-});
+}, runnerSimulado);
 const extensions = new HackathonExtensionsService(sessions, menu, systemClock, uuidGenerator, paymentGateway, checkoutWallet);
 
 // ── QVAC: la IA local ───────────────────────────────────────────────────────
@@ -158,7 +176,12 @@ const server = createServer(async (request, response) => {
 server.listen(port, () => {
   console.log(`Mesa Abierta API disponible en http://localhost:${port}`);
   console.log("Datos de pedidos en memoria: se reinician al detener el servidor.");
-  console.log(`WDK CLI: cliente=${process.env.WDK_CLIENT_WALLET ?? "mesa-cliente-demo"} negocio=${process.env.WDK_BUSINESS_WALLET ?? "mesa-negocio-demo"} red=Sepolia`);
+  console.log(`WDK CLI: cliente=${walletCliente} negocio=${walletNegocio} red=Sepolia`);
+  if (wdkSimulado) {
+    console.log("  [33m*** WDK CLI SIMULADO ***[0m no se ejecuta el binario wdk y NO hay transaccion on-chain.");
+    console.log(`  saldo inicial: cliente ${process.env.WDK_SALDO_CLIENTE ?? 100} USDT · negocio ${process.env.WDK_SALDO_NEGOCIO ?? 0} USDT`);
+    console.log("  para el cobro de verdad: sacar WDK_CLI_MODE y desbloquear las wallets con wdk wallet unlock");
+  }
   if (asistente) {
     const e = asistente.estado();
     console.log(`QVAC local: ${e.modelo} · ${e.parametros} · ${e.cuantizacion} · ${e.device} · ctx ${e.ctxSize}`);

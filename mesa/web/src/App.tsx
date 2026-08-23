@@ -213,6 +213,10 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
    */
   const [metodo, setMetodo] = useState<"WALLET" | "EFECTIVO" | "MERCADO_PAGO">("EFECTIVO");
   const [conCuanto, setConCuanto] = useState("");
+  /** El pago local ya hecho. Mientras no sea null, el dialogo muestra el cierre. */
+  const [cobrado, setCobrado] = useState<{ vueltoInCents?: number; metodo: string } | null>(null);
+  const [wdkSimulado, setWdkSimulado] = useState(false);
+  useEffect(() => { void api<{ wdkSimulado: boolean }>("/api/config").then((c) => setWdkSimulado(c.wdkSimulado)).catch(() => {}); }, []);
   const [confirmed, setConfirmed] = useState(session.status !== "OPEN");
   const [bill, setBill] = useState<BillSummary | null>(null);
   const [mode, setMode] = useState<PaymentMode>("INDIVIDUAL");
@@ -247,15 +251,31 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
       if (mode === "INDIVIDUAL") cuerpo["dinerId"] = diner.id;
       if (metodo === "EFECTIVO") cuerpo["recibidoInCents"] = Math.round(Number(conCuanto || 0) * 100);
       const pago = await post<{ vueltoInCents?: number; metodo: string }>(`/api/tables/${session.id}/pagos/local`, cuerpo);
-      setMessage(pago.metodo === "EFECTIVO" && pago.vueltoInCents
-        ? `Cobrado. Dale ${money.format(pago.vueltoInCents / 100)} de vuelto.`
-        : "Cobrado. La mesa quedó saldada.");
+      // Antes esto solo dejaba un mensaje y el dialogo seguia abierto mostrando
+      // los botones de cobrar. La mesa ya estaba cerrada por atras, asi que
+      // cualquier cosa que tocaras despues fallaba con "primero se debe
+      // solicitar la cuenta" — y parecia un bug de WDK cuando en realidad el
+      // cobro ya habia salido bien.
+      setCobrado(pago);
       await onRefresh();
     } catch (cause) { setMessage(messageOf(cause)); }
     finally { setBusy(false); }
   };
 
-  return <div className="modal-backdrop"><section className="bill-dialog"><button className="close" onClick={onClose}>×</button>{!confirmed ? <><span className="eyebrow">CUENTA · MESA {tableNumber}</span><h2>¿Pedimos la cuenta?</h2><p>Al confirmar, nadie podrá agregar productos. Sólo se habilita cuando todo fue entregado.</p>{!canRequest && <div className="notice warn">Todavía hay pedidos sin entregar.</div>}<div className="dialog-actions"><button className="outline" onClick={onClose}>Seguir pidiendo</button><button className="primary" disabled={!canRequest || busy} onClick={() => void requestBill()}>Sí, pedir la cuenta</button></div></> : <><span className="eyebrow">WDK CLI CHECKOUT · SEPOLIA</span><h2>Cliente → negocio</h2><div className="pay-modes"><button className={mode === "INDIVIDUAL" ? "active" : ""} onClick={() => setMode("INDIVIDUAL")}>Pago lo mío<small>{money.format(personal / 100)}</small></button><button className={mode === "TABLE" ? "active" : ""} onClick={() => setMode("TABLE")}>Pago toda la mesa<small>{money.format((bill?.subtotalInCents ?? 0) / 100)}</small></button></div><label className="tip-label">Propina<div className="tips">{[0, 5, 10, 15].map((value) => <button className={tip === value ? "active" : ""} key={value} onClick={() => setTip(value)}>{value === 0 ? "Sin" : `${value}%`}</button>)}</div></label><div className="bill-total"><span>Total</span><strong>{money.format(total / 100)}</strong></div><div className="metodos-pago">
+  return <div className="modal-backdrop"><section className="bill-dialog"><button className="close" onClick={onClose}>×</button>{cobrado ? <>
+    <span className="eyebrow">LISTO</span>
+    <h2>{cobrado.metodo === "EFECTIVO" ? "Cobrado en efectivo" : "Pago registrado"}</h2>
+    {cobrado.metodo === "EFECTIVO" && cobrado.vueltoInCents
+      ? <div className="vuelto ok grande"><span>Dale de vuelto</span><strong>{money.format(cobrado.vueltoInCents / 100)}</strong></div>
+      : <p>{cobrado.metodo === "MERCADO_PAGO" ? "Registrado como pago de demostración: no se conectó con Mercado Pago." : "Sin vuelto: pagó justo."}</p>}
+    <p>{session.status === "CLOSED" ? "La mesa quedó cerrada y libre para la próxima." : "Todavía falta que paguen los demás comensales."}</p>
+    <div className="dialog-actions"><button className="primary" onClick={onClose}>Listo</button></div>
+  </> : session.status === "CLOSED" ? <>
+    <span className="eyebrow">MESA {tableNumber}</span>
+    <h2>Esta cuenta ya está paga</h2>
+    <p>La mesa se cerró. No queda nada por cobrar.</p>
+    <div className="dialog-actions"><button className="primary" onClick={onClose}>Cerrar</button></div>
+  </> : !confirmed ? <><span className="eyebrow">CUENTA · MESA {tableNumber}</span><h2>¿Pedimos la cuenta?</h2><p>Al confirmar, nadie podrá agregar productos. Sólo se habilita cuando todo fue entregado.</p>{!canRequest && <div className="notice warn">Todavía hay pedidos sin entregar.</div>}<div className="dialog-actions"><button className="outline" onClick={onClose}>Seguir pidiendo</button><button className="primary" disabled={!canRequest || busy} onClick={() => void requestBill()}>Sí, pedir la cuenta</button></div></> : <><span className="eyebrow">WDK CLI CHECKOUT · SEPOLIA</span><h2>Cliente → negocio</h2><div className="pay-modes"><button className={mode === "INDIVIDUAL" ? "active" : ""} onClick={() => setMode("INDIVIDUAL")}>Pago lo mío<small>{money.format(personal / 100)}</small></button><button className={mode === "TABLE" ? "active" : ""} onClick={() => setMode("TABLE")}>Pago toda la mesa<small>{money.format((bill?.subtotalInCents ?? 0) / 100)}</small></button></div><label className="tip-label">Propina<div className="tips">{[0, 5, 10, 15].map((value) => <button className={tip === value ? "active" : ""} key={value} onClick={() => setTip(value)}>{value === 0 ? "Sin" : `${value}%`}</button>)}</div></label><div className="bill-total"><span>Total</span><strong>{money.format(total / 100)}</strong></div><div className="metodos-pago">
       <span className="metodos-titulo">¿Cómo pagás?</span>
       <div className="metodos-grid">
         <button className={metodo === "WALLET" ? "metodo activo" : "metodo"} onClick={() => setMetodo("WALLET")}>
@@ -299,7 +319,11 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
       <p>Botón de demostración. No se conecta con Mercado Pago: no hay API, ni credenciales, ni webhook. Registra el cobro y cierra la mesa.</p>
     </div>}
 
-    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Cliente" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Negocio" wallet={wallets.business} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{metodo === "WALLET" && receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
+    {metodo === "WALLET" && wdkSimulado && <div className="aviso-simulado">
+      <b>Checkout simulado</b>
+      <span>No se ejecuta el binario <code>wdk</code> y no hay transacción on-chain. El recorrido —saldo, dry-run, confirmación, transferencia— es el mismo. Para el cobro real: sacar <code>WDK_CLI_MODE</code> y desbloquear las wallets.</span>
+    </div>}
+    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{metodo === "WALLET" && receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
       ? <>
           <div className="dialog-actions triple">
             <button className="outline" disabled={busy} onClick={() => void loadWallets()}>Actualizar wallets</button>
@@ -318,7 +342,27 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
         </div>}</>}</section></div>;
 }
 
-function WalletMini({ title, wallet }: { title: string; wallet: WalletPair["client"] }) { return <div className="wallet-mini"><span>{title}</span><strong>{wallet.walletName}</strong><small>{shortAddress(wallet.address) || "Bloqueada / sin dirección"}</small><b>{wallet.balance ?? "—"} USD₮</b></div>; }
+/**
+ * La billetera, en la pantalla del comensal.
+ *
+ * `mostrarSaldo` existe por una razon de producto, no tecnica: al cliente se le
+ * muestra CUANTO TIENE EL —lo necesita para saber si le alcanza— y A QUIEN le
+ * esta por pagar —lo necesita para verificar que no lo esten estafando—, pero
+ * NO cuanta plata tiene el restaurante. Eso es informacion del local y no tiene
+ * por que estar en el telefono de un desconocido.
+ *
+ * En la pantalla de caja se muestra completa: ahi el que mira es el dueno.
+ */
+function WalletMini({ title, wallet, mostrarSaldo = true }: { title: string; wallet: WalletPair["client"]; mostrarSaldo?: boolean }) {
+  return <div className="wallet-mini">
+    <span>{title}</span>
+    <strong>{wallet.walletName}</strong>
+    <small>{shortAddress(wallet.address) || "Bloqueada / sin dirección"}</small>
+    {mostrarSaldo
+      ? <b>{wallet.balance ?? "—"} USD₮</b>
+      : <b className="destino">destinatario</b>}
+  </div>;
+}
 
 function KitchenView({ navigate }: { navigate: (path: string) => void }) {
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
@@ -565,11 +609,15 @@ function LlamarMozoDialog({ sessionId, dinerId, onClose }: { sessionId: string; 
  * la marca. Se ve bien igual y no deja un icono roto en la pantalla.
  */
 function LogoMercadoPago({ grande = false }: { grande?: boolean }) {
-  const [fallo, setFallo] = useState(false);
-  if (fallo) return <b className={grande ? "mp-texto grande" : "mp-texto"}>mercado pago</b>;
-  return <img src="/mercado-pago.png" alt="Mercado Pago"
+  // Dos intentos y una red: primero el PNG oficial si alguien lo dejo en
+  // web/public/, despues el SVG dibujado a mano que viene en el repo, y por
+  // ultimo la marca escrita. Nunca queda un icono roto en la pantalla.
+  const [intento, setIntento] = useState(0);
+  const fuentes = ["/mercado-pago.png", "/mercado-pago.svg"];
+  if (intento >= fuentes.length) return <b className={grande ? "mp-texto grande" : "mp-texto"}>mercado pago</b>;
+  return <img src={fuentes[intento]} alt="Mercado Pago"
     className={grande ? "mp-logo grande" : "mp-logo"}
-    onError={() => setFallo(true)} />;
+    onError={() => setIntento((n) => n + 1)} />;
 }
 
 function StateCard({ title, text }: { title: string; text: string }) { return <main className="state-wrap"><section><span className="brand-mark">M</span><h1>{title}</h1><p>{text}</p></section></main>; }
