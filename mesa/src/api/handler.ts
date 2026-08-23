@@ -32,7 +32,13 @@ export function createApiHandler(
       // que se hace pasar por real es lo que un jurado tiene que poder
       // descartar de un vistazo.
       if (method === "GET" && url.pathname === "/api/config") {
-        return json(response, 200, { wdkSimulado: (process.env.WDK_CLI_MODE ?? "").trim() === "simulado" });
+        return json(response, 200, {
+          wdkSimulado: (process.env.WDK_CLI_MODE ?? "").trim() === "simulado",
+          // La cotizacion la manda el servidor: si el boton dijera un monto en
+          // USDT calculado con otra tasa que la del cobro, el recibo saldria
+          // distinto de lo que la persona acepto.
+          arsPorUsdt: Number(process.env.DEMO_ARS_PER_USDT ?? 1_000),
+        });
       }
       if (method === "GET" && url.pathname === "/api/agente") {
         return json(response, 200, agente ? agente.estado() : { disponible: false, motivo: "el modelo local no esta cargado" });

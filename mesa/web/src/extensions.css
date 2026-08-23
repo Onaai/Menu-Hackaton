@@ -320,3 +320,16 @@
    cualquier color da ese color, asi que el fondo desaparece y la tinta del
    logo queda igual. Solo sirve sobre fondos claros, que es el caso. */
 .mp-logo{mix-blend-mode:multiply}
+
+/* El boton unico de pago: es la confirmacion, asi que tiene que pesar. */
+.dialog-actions .primary.grande{width:100%;padding:17px;font-size:15px;font-weight:800}
+
+/* El recibo del cobro con billetera. El hash es lo que se muestra en el video,
+   asi que va completo y seleccionable, no recortado. */
+.recibo-monto{display:flex;align-items:baseline;gap:8px;margin:14px 0 6px}
+.recibo-monto strong{font:800 44px/1 "DM Sans",sans-serif;color:var(--green)}
+.recibo-monto span{color:var(--muted);font-size:13px;font-weight:700}
+.recibo-ruta{color:var(--muted);font-size:12px;margin-bottom:12px}
+.recibo-hash{padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:#fbfcfe}
+.recibo-hash span{display:block;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.04em;margin-bottom:4px}
+.recibo-hash code{font-size:11px;line-height:1.5;overflow-wrap:anywhere;user-select:all}

@@ -2,6 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, patch, post } from "./api";
 import type { BillSummary, CheckoutPreviewResponse, Diner, EstadoAgente, FinancialSummary, KitchenOrder, LlamadaPendiente, MenuAssistantResponse, MenuItem, OrderStatus, PaymentMode, RespuestaAgente, TableSession, WalletPair, WdkCliPayment } from "./types";
 
+/**
+ * Maximo por producto en un mismo pedido.
+ *
+ * Tiene que coincidir con el que valida `placeOrder` en el servidor. Si se
+ * separan, la pantalla deja armar un pedido que la API va a rechazar entero.
+ */
+const MAX_POR_PRODUCTO = 20;
+
 const money = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 const statusLabel: Record<OrderStatus, string> = { RECEIVED: "Recibido", PREPARING: "En preparación", READY: "Listo", DELIVERED: "Entregado" };
 const nextStatus: Record<OrderStatus, OrderStatus | null> = { RECEIVED: "PREPARING", PREPARING: "READY", READY: "DELIVERED", DELIVERED: null };
@@ -69,7 +77,34 @@ function DinerView({ tableNumber, orderView, navigate }: { tableNumber: number; 
   useEffect(() => { if (!session || session.status === "CLOSED") return; const timer = window.setInterval(() => void refreshSession(session.id), 3_000); return () => window.clearInterval(timer); }, [session?.id, session?.status, refreshSession]);
 
   const join = async () => { if (!session) return; setError(""); try { const joined = await post<Diner>(`/api/tables/${session.id}/diners`, { name }); window.localStorage.setItem(`mesa-abierta-diner-${session.id}`, joined.id); setDiner(joined); await refreshSession(session.id); } catch (cause) { setError(messageOf(cause)); } };
-  const change = (id: string, delta: number) => setCart((current) => { const quantity = Math.max(0, (current[id] ?? 0) + delta); const next = { ...current }; if (quantity) next[id] = quantity; else { delete next[id]; setNotes((currentNotes) => { const copy = { ...currentNotes }; delete copy[id]; return copy; }); } return next; });
+    /**
+   * Suma o resta unidades de un producto.
+   *
+   * El tope de 20 lo valida el servidor desde siempre, pero la pantalla no lo
+   * conocia: te dejaba llegar a 21 y recien al confirmar te rebotaba el pedido
+   * ENTERO con "cada cantidad debe ser un entero entre 1 y 20". Perdias todo
+   * lo que habias armado por un toque de mas en un solo plato.
+   *
+   * Ahora se topea acá y se avisa en el momento. El servidor sigue validando
+   * igual — la pantalla no es la que manda — pero deja de ser la que te mete
+   * en un estado que la API va a rechazar.
+   */
+  const change = (id: string, delta: number) => setCart((current) => {
+    const pedido = (current[id] ?? 0) + delta;
+    if (pedido > MAX_POR_PRODUCTO) {
+      setToast("");
+      setError(`Son ${MAX_POR_PRODUCTO} por producto como máximo. Si necesitás más, llamá al mozo.`);
+      return current;
+    }
+    const quantity = Math.max(0, pedido);
+    const next = { ...current };
+    if (quantity) next[id] = quantity;
+    else {
+      delete next[id];
+      setNotes((currentNotes) => { const copy = { ...currentNotes }; delete copy[id]; return copy; });
+    }
+    return next;
+  });
   const sendOrder = async () => { if (!session || !diner) return; const selected = Object.entries(cart).filter(([, quantity]) => quantity > 0); if (!selected.length) return; try { await post(`/api/tables/${session.id}/orders`, { dinerId: diner.id, items: selected.map(([menuItemId, quantity]) => ({ menuItemId, quantity, ...(notes[menuItemId]?.trim() ? { note: notes[menuItemId].trim() } : {}) })) }); setCart({}); setNotes({}); setToast("Pedido enviado. Ya podés seguirlo desde Mi pedido."); await refreshSession(session.id); navigate(`/mesa/${tableNumber}/pedido`); window.setTimeout(() => setToast(""), 3500); } catch (cause) { setError(messageOf(cause)); } };
 
   if (loading) return <StateCard title={`Abriendo Mesa ${tableNumber}…`} text="Estamos cargando el menú de tu mesa." />;
@@ -87,12 +122,12 @@ function DinerView({ tableNumber, orderView, navigate }: { tableNumber: number; 
 
   if (orderView) return <><main className="my-order-page"><section className="profile-banner"><div className="avatar">{diner.name.slice(0, 1).toUpperCase()}</div><div><span>Este teléfono</span><h1>{diner.name}</h1><p>Mesa {tableNumber} · {myOrders.length} {myOrders.length === 1 ? "pedido" : "pedidos"}</p></div><button className="outline" onClick={() => navigate(`/mesa/${tableNumber}`)}>＋ Pedir algo más</button></section><div className="order-summary-grid"><section className="summary-card"><span>Tu consumo</span><strong>{money.format(myConsumed / 100)}</strong><small>Sin propina</small></section><section className="summary-card"><span>Estado</span><strong>{myOrders.length ? statusLabel[myOrders[myOrders.length - 1].status] : "Sin pedidos"}</strong><small>Se actualiza automáticamente</small></section><section className="summary-card"><span>Cuenta</span><strong>{session.status === "OPEN" ? "Abierta" : session.status === "BILL_REQUESTED" ? "Solicitada" : "Cerrada"}</strong><small>Mesa {tableNumber}</small></section></div><section className="orders-panel"><div className="panel-title"><div><span className="eyebrow">MI PEDIDO</span><h2>Lo que pediste</h2></div>{session.status !== "CLOSED" && <button className="primary compact" disabled={!canRequestBill && session.status === "OPEN"} onClick={() => setBillOpen(true)}>{session.status === "OPEN" ? "Pedir la cuenta" : "Ver cuenta"}</button>}</div>{myOrders.length ? <div className="order-list">{[...myOrders].reverse().map((order) => <article className="my-order-card" key={order.id}><div className="my-order-head"><div><strong>{order.type === "INITIAL" ? "Pedido inicial" : "Pedido adicional"}</strong><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span></div><ul>{order.items.map((item) => <li key={`${order.id}-${item.menuItemId}`}><div><strong>{item.quantity}× {item.name}</strong>{item.note && <small>{item.note}</small>}{order.status === "RECEIVED" && session.status === "OPEN" && <button className="remove-ordered-item" onClick={() => void removeOrderedItem(order.id, item.menuItemId)}>Quitar del pedido</button>}</div><span>{money.format(item.unitPriceInCents * item.quantity / 100)}</span></li>)}</ul>{order.status === "RECEIVED" && <p className="editable-hint">Todavía podés corregir este pedido. Cuando pase a “En preparación”, queda bloqueado.</p>}</article>)}</div> : <div className="empty-order"><h3>Todavía no pediste nada</h3><p>Elegí tus platos desde el menú.</p><button className="primary" onClick={() => navigate(`/mesa/${tableNumber}`)}>Ir al menú</button></div>}</section></main>{billOpen && <BillDialog session={session} diner={diner} tableNumber={tableNumber} canRequest={canRequestBill} onClose={() => setBillOpen(false)} onRefresh={() => refreshSession(session.id)} />}{error && <div className="toast error">{error}</div>}{toast && <div className="toast success">✓ {toast}</div>}</>;
 
-  return <><main className="customer-layout"><section className="menu-column"><div className="welcome-row"><div><span className="eyebrow">MESA {tableNumber} · {diner.name.toUpperCase()}</span><h1>¿Qué vas a pedir?</h1><p>Elegí, personalizá y enviá. Todo queda asociado a tu nombre y a esta mesa.</p></div><div className="welcome-actions"><button className="llamar-mozo" onClick={() => setLlamarOpen(true)}>🔔 Llamar al mozo</button><button className="assistant-launch" onClick={() => setAssistantOpen(true)}>✦ Asistente del menú</button><button className="order-shortcut" onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}><span>Mi pedido</span><strong>{myOrders.length}</strong></button></div></div><div className="categories">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="section-title"><h2>{category === "Todos" ? "Menú" : category}</h2><span>{visibleMenu.length} opciones</span></div><div className="menu-grid">{visibleMenu.map((item) => <article className="menu-card" key={item.id}><div className="dish-visual"><span>{item.name.slice(0, 1)}</span></div><div className="dish-copy"><div><span className="dish-category">{item.category}</span><h3>{item.name}</h3><p>{item.description}</p></div><div className="dish-action"><strong>{money.format(item.priceInCents / 100)}</strong>{cart[item.id] ? <div className="counter"><button onClick={() => change(item.id, -1)}>−</button><span>{cart[item.id]}</span><button onClick={() => change(item.id, 1)}>+</button></div> : <button onClick={() => change(item.id, 1)}>Agregar</button>}</div>{cart[item.id] ? <button className="edit-food" onClick={() => setEditingItemId(item.id)}>{notes[item.id] ? "✓ Personalizado" : "Editar / aclarar"}</button> : null}</div></article>)}</div></section><aside className="cart"><div className="cart-head"><div><span>Tu selección</span><h2>Pedido de {diner.name}</h2></div><b>{cartCount}</b></div>{cartCount ? <><div className="cart-lines">{menu.filter((item) => cart[item.id]).map((item) => <div className="cart-line" key={item.id}><div><span>{cart[item.id]}× {item.name}</span>{notes[item.id] && <small>{notes[item.id]}</small>}<button onClick={() => setEditingItemId(item.id)}>Editar</button></div><strong>{money.format(item.priceInCents * cart[item.id] / 100)}</strong><button className="quitar-linea" aria-label={`Quitar ${item.name} del pedido`} title="Quitar del pedido" onClick={() => quitarDelCarrito(item.id)}>×</button></div>)}</div><div className="total"><span>Total de este envío</span><strong>{money.format(cartTotal / 100)}</strong></div><button className="primary" disabled={session.status !== "OPEN"} onClick={() => void sendOrder()}>Confirmar pedido <span>→</span></button><small>Podés volver a pedir más adelante.</small></> : <div className="empty"><span>＋</span><h3>Tu pedido está vacío</h3><p>Agregá algo del menú para empezar.</p></div>}</aside></main>{editingItemId && <EditFoodDialog item={menu.find((item) => item.id === editingItemId)!} quantity={cart[editingItemId] ?? 1} note={notes[editingItemId] ?? ""} onClose={() => setEditingItemId(null)} onQuantity={(quantity) => setCart((current) => ({ ...current, [editingItemId]: quantity }))} onSave={(note) => { setNotes((current) => ({ ...current, [editingItemId]: note })); setEditingItemId(null); }} />}{assistantOpen && <MenuAssistant onClose={() => setAssistantOpen(false)} onAdd={(item) => { change(item.id, 1); setAssistantOpen(false); }} />}{llamarOpen && <LlamarMozoDialog sessionId={session.id} dinerId={diner.id} onClose={() => setLlamarOpen(false)} />}{cartCount > 0 && <button className="mobile-cart" onClick={() => document.querySelector(".cart")?.scrollIntoView({ behavior: "smooth" })}><span>Ver mi pedido · {cartCount}</span><strong>{money.format(cartTotal / 100)}</strong></button>}{error && <div className="toast error">{error}</div>}{toast && <div className="toast success">✓ {toast}</div>}</>;
+  return <><main className="customer-layout"><section className="menu-column"><div className="welcome-row"><div><span className="eyebrow">MESA {tableNumber} · {diner.name.toUpperCase()}</span><h1>¿Qué vas a pedir?</h1><p>Elegí, personalizá y enviá. Todo queda asociado a tu nombre y a esta mesa.</p></div><div className="welcome-actions"><button className="llamar-mozo" onClick={() => setLlamarOpen(true)}>🔔 Llamar al mozo</button><button className="assistant-launch" onClick={() => setAssistantOpen(true)}>✦ Asistente del menú</button><button className="order-shortcut" onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}><span>Mi pedido</span><strong>{myOrders.length}</strong></button></div></div><div className="categories">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div><div className="section-title"><h2>{category === "Todos" ? "Menú" : category}</h2><span>{visibleMenu.length} opciones</span></div><div className="menu-grid">{visibleMenu.map((item) => <article className="menu-card" key={item.id}><div className="dish-visual"><span>{item.name.slice(0, 1)}</span></div><div className="dish-copy"><div><span className="dish-category">{item.category}</span><h3>{item.name}</h3><p>{item.description}</p></div><div className="dish-action"><strong>{money.format(item.priceInCents / 100)}</strong>{cart[item.id] ? <div className="counter"><button onClick={() => change(item.id, -1)}>−</button><span>{cart[item.id]}</span><button onClick={() => change(item.id, 1)}>+</button></div> : <button onClick={() => change(item.id, 1)}>Agregar</button>}</div>{cart[item.id] ? <button className="edit-food" onClick={() => setEditingItemId(item.id)}>{notes[item.id] ? "✓ Personalizado" : "Editar / aclarar"}</button> : null}</div></article>)}</div></section><aside className="cart"><div className="cart-head"><div><span>Tu selección</span><h2>Pedido de {diner.name}</h2></div><b>{cartCount}</b></div>{cartCount ? <><div className="cart-lines">{menu.filter((item) => cart[item.id]).map((item) => <div className="cart-line" key={item.id}><div><span>{cart[item.id]}× {item.name}</span>{notes[item.id] && <small>{notes[item.id]}</small>}<button onClick={() => setEditingItemId(item.id)}>Editar</button></div><strong>{money.format(item.priceInCents * cart[item.id] / 100)}</strong><button className="quitar-linea" aria-label={`Quitar ${item.name} del pedido`} title="Quitar del pedido" onClick={() => quitarDelCarrito(item.id)}>×</button></div>)}</div><div className="total"><span>Total de este envío</span><strong>{money.format(cartTotal / 100)}</strong></div><button className="primary" disabled={session.status !== "OPEN"} onClick={() => void sendOrder()}>Confirmar pedido <span>→</span></button><small>Podés volver a pedir más adelante.</small></> : <div className="empty"><span>＋</span><h3>Tu pedido está vacío</h3><p>Agregá algo del menú para empezar.</p></div>}</aside></main>{editingItemId && <EditFoodDialog item={menu.find((item) => item.id === editingItemId)!} quantity={cart[editingItemId] ?? 1} note={notes[editingItemId] ?? ""} onClose={() => setEditingItemId(null)} onQuantity={(quantity) => setCart((current) => ({ ...current, [editingItemId]: Math.min(MAX_POR_PRODUCTO, quantity) }))} onSave={(note) => { setNotes((current) => ({ ...current, [editingItemId]: note })); setEditingItemId(null); }} />}{assistantOpen && <MenuAssistant onClose={() => setAssistantOpen(false)} onAdd={(item) => { change(item.id, 1); setAssistantOpen(false); }} />}{llamarOpen && <LlamarMozoDialog sessionId={session.id} dinerId={diner.id} onClose={() => setLlamarOpen(false)} />}{cartCount > 0 && <button className="mobile-cart" onClick={() => document.querySelector(".cart")?.scrollIntoView({ behavior: "smooth" })}><span>Ver mi pedido · {cartCount}</span><strong>{money.format(cartTotal / 100)}</strong></button>}{error && <div className="toast error">{error}</div>}{toast && <div className="toast success">✓ {toast}</div>}</>;
 }
 
 function EditFoodDialog({ item, quantity, note, onClose, onQuantity, onSave }: { item: MenuItem; quantity: number; note: string; onClose: () => void; onQuantity: (quantity: number) => void; onSave: (note: string) => void }) {
   const [draft, setDraft] = useState(note);
-  return <div className="modal-backdrop"><section className="food-dialog"><button className="close" onClick={onClose}>×</button><span className="eyebrow">PERSONALIZAR</span><h2>{item.name}</h2><p>{item.description}</p><div className="quantity-row"><span>Cantidad</span><div className="counter large"><button onClick={() => onQuantity(Math.max(1, quantity - 1))}>−</button><span>{quantity}</span><button onClick={() => onQuantity(Math.min(20, quantity + 1))}>+</button></div></div><label>Aclaraciones para cocina<textarea value={draft} maxLength={180} placeholder="Ej. sin cebolla, salsa aparte…" onChange={(event) => setDraft(event.target.value)} /></label><div className="quick-notes">{["Sin cebolla", "Sin sal", "Salsa aparte", "Bien cocido"].map((text) => <button key={text} onClick={() => setDraft((current) => current ? `${current}, ${text.toLowerCase()}` : text)}>{text}</button>)}</div><button className="primary full" onClick={() => onSave(draft)}>Guardar cambios</button></section></div>;
+  return <div className="modal-backdrop"><section className="food-dialog"><button className="close" onClick={onClose}>×</button><span className="eyebrow">PERSONALIZAR</span><h2>{item.name}</h2><p>{item.description}</p><div className="quantity-row"><span>Cantidad</span><div className="counter large"><button onClick={() => onQuantity(Math.max(1, quantity - 1))}>−</button><span>{quantity}</span><button onClick={() => onQuantity(Math.min(MAX_POR_PRODUCTO, quantity + 1))}>+</button></div></div><label>Aclaraciones para cocina<textarea value={draft} maxLength={180} placeholder="Ej. sin cebolla, salsa aparte…" onChange={(event) => setDraft(event.target.value)} /></label><div className="quick-notes">{["Sin cebolla", "Sin sal", "Salsa aparte", "Bien cocido"].map((text) => <button key={text} onClick={() => setDraft((current) => current ? `${current}, ${text.toLowerCase()}` : text)}>{text}</button>)}</div><button className="primary full" onClick={() => onSave(draft)}>Guardar cambios</button></section></div>;
 }
 
 /**
@@ -216,7 +251,12 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
   /** El pago local ya hecho. Mientras no sea null, el dialogo muestra el cierre. */
   const [cobrado, setCobrado] = useState<{ vueltoInCents?: number; metodo: string } | null>(null);
   const [wdkSimulado, setWdkSimulado] = useState(false);
-  useEffect(() => { void api<{ wdkSimulado: boolean }>("/api/config").then((c) => setWdkSimulado(c.wdkSimulado)).catch(() => {}); }, []);
+  const [arsPorUsdt, setArsPorUsdt] = useState<number | null>(null);
+  useEffect(() => {
+    void api<{ wdkSimulado: boolean; arsPorUsdt: number }>("/api/config")
+      .then((c) => { setWdkSimulado(c.wdkSimulado); setArsPorUsdt(c.arsPorUsdt); })
+      .catch(() => {});
+  }, []);
   const [confirmed, setConfirmed] = useState(session.status !== "OPEN");
   const [bill, setBill] = useState<BillSummary | null>(null);
   const [mode, setMode] = useState<PaymentMode>("INDIVIDUAL");
@@ -243,6 +283,41 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
    * diferencia entre un numero util y un numero confuso.
    */
   const vuelto = conCuanto === "" ? null : Math.round(Number(conCuanto) * 100) - total;
+  /**
+   * El total en USD₮, para escribirlo en el boton.
+   *
+   * Se muestra la moneda con la que va a salir la plata y no los pesos: es el
+   * numero que despues aparece en el recibo y en la billetera, y si el boton
+   * dice una cosa y el recibo otra, el que paga desconfia con razon.
+   */
+  const enUsdt = arsPorUsdt ? (total / 100 / arsPorUsdt).toFixed(2) : null;
+  /**
+   * Pagar con la billetera, en un solo toque.
+   *
+   * Antes eran dos botones: "Previsualizar con WDK" y despues "Confirmar y
+   * enviar". A un comensal "previsualizar con WDK" no le dice nada, y el
+   * segundo boton quedaba gris hasta que apretaba el primero — que se leia
+   * como que la app estaba rota.
+   *
+   * EL DRY-RUN NO SE FUE, dejo de ser un boton. Sigue corriendo antes de cada
+   * envio y sigue siendo lo que WDK usa para validar; lo que cambia es que
+   * corre adentro de la misma accion. Y la confirmacion humana tampoco se fue:
+   * es este boton, que muestra el monto exacto en USD₮ antes de que lo
+   * aprietes. El preview de un solo uso y atado al monto sigue igual en el
+   * gateway, con sus tests.
+   */
+  const pagarConBilletera = async () => {
+    setBusy(true); setMessage(""); setReceipt(null);
+    try {
+      const p = await post<CheckoutPreviewResponse>(`/api/tables/${session.id}/payments/wdk/preview`, paymentInput);
+      setPreview(p);
+      const r = await post<WdkCliPayment>(`/api/tables/${session.id}/payments/wdk/execute`, { ...paymentInput, previewId: p.preview.previewId });
+      setReceipt(r);
+      await onRefresh();
+    } catch (cause) { setMessage(messageOf(cause)); }
+    finally { setBusy(false); }
+  };
+
   /** Cobro local: efectivo o Mercado Pago. Ninguno sale a internet. */
   const cobrarLocal = async () => {
     setBusy(true); setMessage("");
@@ -268,6 +343,21 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
     {cobrado.metodo === "EFECTIVO" && cobrado.vueltoInCents
       ? <div className="vuelto ok grande"><span>Dale de vuelto</span><strong>{money.format(cobrado.vueltoInCents / 100)}</strong></div>
       : <p>{cobrado.metodo === "MERCADO_PAGO" ? "Registrado como pago de demostración: no se conectó con Mercado Pago." : "Sin vuelto: pagó justo."}</p>}
+    <p>{session.status === "CLOSED" ? "La mesa quedó cerrada y libre para la próxima." : "Todavía falta que paguen los demás comensales."}</p>
+    <div className="dialog-actions"><button className="primary" onClick={onClose}>Listo</button></div>
+  </> : receipt ? <>
+    {/* El recibo va ANTES del "ya esta paga": al cobrar con la billetera la
+        sesion queda CLOSED en el mismo instante, asi que la pantalla de cuenta
+        cerrada se le adelantaba y se comia el hash de la transaccion — que es
+        justamente lo que hay que poder mostrar. */}
+    <span className="eyebrow">PAGO ENVIADO · SEPOLIA</span>
+    <h2>{wdkSimulado ? "Cobrado (simulado)" : "Cobrado en la red"}</h2>
+    <div className="recibo-monto"><strong>{receipt.amount}</strong><span>USD₮</span></div>
+    <div className="recibo-ruta">{shortAddress(receipt.fromAddress)} → {shortAddress(receipt.toAddress)}</div>
+    {receipt.transactionHash
+      ? <div className="recibo-hash"><span>Transacción</span><code>{receipt.transactionHash}</code></div>
+      : <p>WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI.</p>}
+    {wdkSimulado && <div className="notice warn">Checkout simulado: no hubo transacción on-chain.</div>}
     <p>{session.status === "CLOSED" ? "La mesa quedó cerrada y libre para la próxima." : "Todavía falta que paguen los demás comensales."}</p>
     <div className="dialog-actions"><button className="primary" onClick={onClose}>Listo</button></div>
   </> : session.status === "CLOSED" ? <>
@@ -325,10 +415,10 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
     </div>}
     {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{metodo === "WALLET" && receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
       ? <>
-          <div className="dialog-actions triple">
-            <button className="outline" disabled={busy} onClick={() => void loadWallets()}>Actualizar wallets</button>
-            <button className="outline" disabled={busy || Boolean(receipt)} onClick={() => void createPreview()}>1. Previsualizar con WDK</button>
-            <button className="primary" disabled={busy || !preview || Boolean(receipt)} onClick={() => void execute()}>2. Confirmar y enviar</button>
+          <div className="dialog-actions">
+            <button className="primary grande" disabled={busy || Boolean(receipt)} onClick={() => void pagarConBilletera()}>
+              {busy ? "Cobrando…" : receipt ? "Pagado" : `Pagar ${enUsdt !== null ? `${enUsdt} USD₮` : money.format(total / 100)}`}
+            </button>
           </div>
           <p className="security-copy">Wallets de prueba únicamente. La seed y la contraseña nunca pasan por la web ni se guardan en el repositorio.</p>
         </>
