@@ -26,22 +26,33 @@ export default function App() {
   const kitchen = path.startsWith("/cocina");
   const tableNumber = tableNumberFromPath(path);
   const orderView = !kitchen && path.endsWith("/pedido");
-  return <div className="app"><Header kitchen={kitchen} orderView={orderView} tableNumber={tableNumber} navigate={navigate} />{kitchen ? <KitchenView navigate={navigate} /> : <DinerView tableNumber={tableNumber} orderView={orderView} navigate={navigate} />}</div>;
+  // Lo sabe DinerView; el encabezado esta afuera, asi que sube por aca.
+  const [hayComensal, setHayComensal] = useState(false);
+  return <div className="app"><Header kitchen={kitchen} orderView={orderView} tableNumber={tableNumber} hayComensal={hayComensal} navigate={navigate} />{kitchen ? <KitchenView navigate={navigate} /> : <DinerView tableNumber={tableNumber} orderView={orderView} onComensal={setHayComensal} navigate={navigate} />}</div>;
 }
 
-function Header({ kitchen, orderView, tableNumber, navigate }: { kitchen: boolean; orderView: boolean; tableNumber: number; navigate: (path: string) => void }) {
+/**
+ * `hayComensal`: si todavia no dijo su nombre, la navegacion no se muestra.
+ *
+ * En la pantalla de bienvenida el boton "Mi pedido" llevaba a una vista de
+ * pedidos de alguien que todavia no existe. Ofrecer una salida que no lleva a
+ * ningun lado es peor que no ofrecerla.
+ */
+function Header({ kitchen, orderView, tableNumber, hayComensal, navigate }: { kitchen: boolean; orderView: boolean; tableNumber: number; hayComensal: boolean; navigate: (path: string) => void }) {
   return <header className="topbar"><button className="brand" onClick={() => navigate(kitchen ? "/cocina" : `/mesa/${tableNumber}`)}><span className="brand-mark">A</span><span>Al Toque</span></button>{/* La chapita de mesa solo tiene sentido del lado del comensal: en la
          pantalla del local se ven TODAS las mesas, asi que decir "Mesa 12"
          arriba es informacion falsa. El 12 sale de la ruta por defecto, no de
          nada real. */}
-    {!kitchen && <div className="table-pill">Mesa {tableNumber}</div>}{kitchen ? <div className="staff-label">Vista interna · cocina</div> : <nav><button className={!orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}`)}>Menú</button><button className={orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}>Mi pedido</button></nav>}</header>;
+    {!kitchen && <div className="table-pill">Mesa {tableNumber}</div>}{kitchen ? <div className="staff-label">Vista interna · cocina</div> : !hayComensal ? null : <nav><button className={!orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}`)}>Menú</button><button className={orderView ? "active" : ""} onClick={() => navigate(`/mesa/${tableNumber}/pedido`)}>Mi pedido</button></nav>}</header>;
 }
 
-function DinerView({ tableNumber, orderView, navigate }: { tableNumber: number; orderView: boolean; navigate: (path: string) => void }) {
+function DinerView({ tableNumber, orderView, onComensal, navigate }: { tableNumber: number; orderView: boolean; onComensal: (hay: boolean) => void; navigate: (path: string) => void }) {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [session, setSession] = useState<TableSession | null>(null);
   const [diner, setDiner] = useState<Diner | null>(null);
   const [name, setName] = useState("");
+  // Le avisa al encabezado si ya hay alguien identificado en este telefono.
+  useEffect(() => { onComensal(Boolean(diner)); }, [diner, onComensal]);
   const [category, setCategory] = useState("Todos");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
