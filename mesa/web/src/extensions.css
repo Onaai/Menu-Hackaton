@@ -312,3 +312,11 @@
 .aviso-simulado b{color:var(--amber);font-size:11px;letter-spacing:.03em}
 .aviso-simulado span{color:var(--ink);font-size:11px;line-height:1.55}
 .aviso-simulado code{background:#fff;border-radius:4px;padding:1px 5px;font-size:10px}
+
+/* El PNG oficial viene en RGB, sin canal alfa: trae el fondo blanco pegado.
+   En el boton sin seleccionar no se nota, pero al activarse el fondo pasa a
+   celeste y quedaria un rectangulo blanco alrededor del logo.
+   `multiply` lo resuelve sin tener que recortar la imagen: blanco por
+   cualquier color da ese color, asi que el fondo desaparece y la tinta del
+   logo queda igual. Solo sirve sobre fondos claros, que es el caso. */
+.mp-logo{mix-blend-mode:multiply}
