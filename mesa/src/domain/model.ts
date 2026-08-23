@@ -91,7 +91,37 @@ export interface WdkCliPayment {
   createdAt: string;
 }
 
-export type PaymentRecord = SimulatedPayment | WdkCliPayment;
+/**
+ * Pago que no toca la blockchain: efectivo en el mostrador o Mercado Pago.
+ *
+ * MERCADO PAGO ES SOLO VISUAL Y ESO SE DECLARA EN EL TIPO.
+ * No hay llamada a la API de Mercado Pago, ni credenciales, ni webhook. El
+ * boton registra el cobro y listo. `simulado: true` no es un comentario que se
+ * puede desactualizar: viaja en la respuesta de la API y la pantalla lo usa
+ * para poner el cartel. Si algun dia se conecta de verdad, el compilador
+ * obliga a pasar por aca.
+ */
+export interface PagoLocal {
+  id: string;
+  metodo: MetodoLocal;
+  mode: PaymentMode;
+  dinerId?: string;
+  subtotalInCents: number;
+  tipPercent: number;
+  tipInCents: number;
+  totalInCents: number;
+  /** Solo efectivo: con cuanto pago la persona. */
+  recibidoInCents?: number;
+  /** Solo efectivo: lo que hay que devolverle. */
+  vueltoInCents?: number;
+  /** true en Mercado Pago: no se llamo a ninguna API. */
+  simulado: boolean;
+  createdAt: string;
+}
+
+export type MetodoLocal = "EFECTIVO" | "MERCADO_PAGO";
+
+export type PaymentRecord = SimulatedPayment | WdkCliPayment | PagoLocal;
 
 export interface TableSession {
   id: string;

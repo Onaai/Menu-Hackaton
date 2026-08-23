@@ -202,6 +202,17 @@ const LEYENDA_DESCARTE: Record<string, string> = {
 };
 
 function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefresh }: { session: TableSession; diner: Diner; tableNumber: number; canRequest: boolean; onClose: () => void; onRefresh: () => Promise<TableSession> }) {
+
+  /**
+   * El metodo elegido.
+   *
+   * Arranca en efectivo y no en billetera a proposito: en un restaurante de
+   * verdad es lo que mas se usa, y ademas es el unico camino que funciona sin
+   * tener las wallets desbloqueadas. Que la pantalla no dependa de un paso de
+   * terminal para mostrar algo es lo que la hace demostrable siempre.
+   */
+  const [metodo, setMetodo] = useState<"WALLET" | "EFECTIVO" | "MERCADO_PAGO">("EFECTIVO");
+  const [conCuanto, setConCuanto] = useState("");
   const [confirmed, setConfirmed] = useState(session.status !== "OPEN");
   const [bill, setBill] = useState<BillSummary | null>(null);
   const [mode, setMode] = useState<PaymentMode>("INDIVIDUAL");
@@ -222,7 +233,89 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
   const personal = bill?.diners.find((item) => item.dinerId === diner.id)?.subtotalInCents ?? 0;
   const payable = mode === "TABLE" ? bill?.subtotalInCents ?? 0 : personal;
   const total = Math.round(payable * (1 + tip / 100));
-  return <div className="modal-backdrop"><section className="bill-dialog"><button className="close" onClick={onClose}>×</button>{!confirmed ? <><span className="eyebrow">CUENTA · MESA {tableNumber}</span><h2>¿Pedimos la cuenta?</h2><p>Al confirmar, nadie podrá agregar productos. Sólo se habilita cuando todo fue entregado.</p>{!canRequest && <div className="notice warn">Todavía hay pedidos sin entregar.</div>}<div className="dialog-actions"><button className="outline" onClick={onClose}>Seguir pidiendo</button><button className="primary" disabled={!canRequest || busy} onClick={() => void requestBill()}>Sí, pedir la cuenta</button></div></> : <><span className="eyebrow">WDK CLI CHECKOUT · SEPOLIA</span><h2>Cliente → negocio</h2><div className="pay-modes"><button className={mode === "INDIVIDUAL" ? "active" : ""} onClick={() => setMode("INDIVIDUAL")}>Pago lo mío<small>{money.format(personal / 100)}</small></button><button className={mode === "TABLE" ? "active" : ""} onClick={() => setMode("TABLE")}>Pago toda la mesa<small>{money.format((bill?.subtotalInCents ?? 0) / 100)}</small></button></div><label className="tip-label">Propina<div className="tips">{[0, 5, 10, 15].map((value) => <button className={tip === value ? "active" : ""} key={value} onClick={() => setTip(value)}>{value === 0 ? "Sin" : `${value}%`}</button>)}</div></label><div className="bill-total"><span>Total</span><strong>{money.format(total / 100)}</strong></div>{wallets && <div className="wallet-flow"><WalletMini title="Cliente" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Negocio" wallet={wallets.business} /></div>}{preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}<div className="dialog-actions triple"><button className="outline" disabled={busy} onClick={() => void loadWallets()}>Actualizar wallets</button><button className="outline" disabled={busy || Boolean(receipt)} onClick={() => void createPreview()}>1. Previsualizar con WDK</button><button className="primary" disabled={busy || !preview || Boolean(receipt)} onClick={() => void execute()}>2. Confirmar y enviar</button></div><p className="security-copy">Wallets de prueba únicamente. La seed y la contraseña nunca pasan por la web ni se guardan en el repositorio.</p></>}</section></div>;
+  /**
+   * El vuelto, en centavos. `null` mientras no escriba nada; negativo si no le
+   * alcanza — y ahi la pantalla dice "Falta" en vez de "Vuelto", que es la
+   * diferencia entre un numero util y un numero confuso.
+   */
+  const vuelto = conCuanto === "" ? null : Math.round(Number(conCuanto) * 100) - total;
+  /** Cobro local: efectivo o Mercado Pago. Ninguno sale a internet. */
+  const cobrarLocal = async () => {
+    setBusy(true); setMessage("");
+    try {
+      const cuerpo: Record<string, unknown> = { metodo, mode, tipPercent: tip };
+      if (mode === "INDIVIDUAL") cuerpo["dinerId"] = diner.id;
+      if (metodo === "EFECTIVO") cuerpo["recibidoInCents"] = Math.round(Number(conCuanto || 0) * 100);
+      const pago = await post<{ vueltoInCents?: number; metodo: string }>(`/api/tables/${session.id}/pagos/local`, cuerpo);
+      setMessage(pago.metodo === "EFECTIVO" && pago.vueltoInCents
+        ? `Cobrado. Dale ${money.format(pago.vueltoInCents / 100)} de vuelto.`
+        : "Cobrado. La mesa quedó saldada.");
+      await onRefresh();
+    } catch (cause) { setMessage(messageOf(cause)); }
+    finally { setBusy(false); }
+  };
+
+  return <div className="modal-backdrop"><section className="bill-dialog"><button className="close" onClick={onClose}>×</button>{!confirmed ? <><span className="eyebrow">CUENTA · MESA {tableNumber}</span><h2>¿Pedimos la cuenta?</h2><p>Al confirmar, nadie podrá agregar productos. Sólo se habilita cuando todo fue entregado.</p>{!canRequest && <div className="notice warn">Todavía hay pedidos sin entregar.</div>}<div className="dialog-actions"><button className="outline" onClick={onClose}>Seguir pidiendo</button><button className="primary" disabled={!canRequest || busy} onClick={() => void requestBill()}>Sí, pedir la cuenta</button></div></> : <><span className="eyebrow">WDK CLI CHECKOUT · SEPOLIA</span><h2>Cliente → negocio</h2><div className="pay-modes"><button className={mode === "INDIVIDUAL" ? "active" : ""} onClick={() => setMode("INDIVIDUAL")}>Pago lo mío<small>{money.format(personal / 100)}</small></button><button className={mode === "TABLE" ? "active" : ""} onClick={() => setMode("TABLE")}>Pago toda la mesa<small>{money.format((bill?.subtotalInCents ?? 0) / 100)}</small></button></div><label className="tip-label">Propina<div className="tips">{[0, 5, 10, 15].map((value) => <button className={tip === value ? "active" : ""} key={value} onClick={() => setTip(value)}>{value === 0 ? "Sin" : `${value}%`}</button>)}</div></label><div className="bill-total"><span>Total</span><strong>{money.format(total / 100)}</strong></div><div className="metodos-pago">
+      <span className="metodos-titulo">¿Cómo pagás?</span>
+      <div className="metodos-grid">
+        <button className={metodo === "WALLET" ? "metodo activo" : "metodo"} onClick={() => setMetodo("WALLET")}>
+          <span className="metodo-icono">₮</span>
+          <b>Billetera</b>
+          <small>USD₮ · Sepolia</small>
+        </button>
+        <button className={metodo === "EFECTIVO" ? "metodo activo" : "metodo"} onClick={() => setMetodo("EFECTIVO")}>
+          <span className="metodo-icono">$</span>
+          <b>Efectivo</b>
+          <small>con vuelto</small>
+        </button>
+        <button className={metodo === "MERCADO_PAGO" ? "metodo activo" : "metodo"} onClick={() => setMetodo("MERCADO_PAGO")}>
+          <LogoMercadoPago />
+          <small>demo</small>
+        </button>
+      </div>
+    </div>
+
+    {metodo === "EFECTIVO" && <div className="efectivo-panel">
+      <label>¿Con cuánto pagás?
+        <input inputMode="numeric" value={conCuanto} placeholder={String(Math.ceil(total / 100))}
+          onChange={(e) => setConCuanto(e.target.value.replace(/[^0-9]/g, ""))} />
+      </label>
+      {/* Los billetes que existen de verdad. Escribir "20000" con el teclado
+          numerico en un celu es incomodo y ademas es la plata que la persona
+          tiene en la mano: se toca el billete y listo. */}
+      <div className="billetes">
+        {[2000, 5000, 10000, 20000].filter((b) => b * 100 >= total).slice(0, 3).map((b) =>
+          <button key={b} onClick={() => setConCuanto(String(b))}>{money.format(b)}</button>)}
+        <button onClick={() => setConCuanto(String(Math.ceil(total / 100)))}>Justo</button>
+      </div>
+      {vuelto !== null && (vuelto >= 0
+        ? <div className="vuelto ok"><span>Vuelto</span><strong>{money.format(vuelto / 100)}</strong></div>
+        : <div className="vuelto falta"><span>Falta</span><strong>{money.format(Math.abs(vuelto) / 100)}</strong></div>)}
+    </div>}
+
+    {metodo === "MERCADO_PAGO" && <div className="mp-panel">
+      <LogoMercadoPago grande />
+      {/* Se dice en la pantalla, no solo en el README: no hay API detras. */}
+      <p>Botón de demostración. No se conecta con Mercado Pago: no hay API, ni credenciales, ni webhook. Registra el cobro y cierra la mesa.</p>
+    </div>}
+
+    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Cliente" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Negocio" wallet={wallets.business} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{metodo === "WALLET" && receipt && <div className="checkout-receipt"><strong>✓ Pago transmitido en Sepolia</strong><p>{receipt.amount} USD₮</p><small>{receipt.transactionHash ? `Tx: ${receipt.transactionHash}` : "WDK CLI no devolvió hash en el campo esperado; revisá la salida del CLI."}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
+      ? <>
+          <div className="dialog-actions triple">
+            <button className="outline" disabled={busy} onClick={() => void loadWallets()}>Actualizar wallets</button>
+            <button className="outline" disabled={busy || Boolean(receipt)} onClick={() => void createPreview()}>1. Previsualizar con WDK</button>
+            <button className="primary" disabled={busy || !preview || Boolean(receipt)} onClick={() => void execute()}>2. Confirmar y enviar</button>
+          </div>
+          <p className="security-copy">Wallets de prueba únicamente. La seed y la contraseña nunca pasan por la web ni se guardan en el repositorio.</p>
+        </>
+      : <div className="dialog-actions">
+          <button className="primary" disabled={busy || (metodo === "EFECTIVO" && (vuelto === null || vuelto < 0))}
+            onClick={() => void cobrarLocal()}>
+            {metodo === "EFECTIVO"
+              ? (vuelto && vuelto > 0 ? `Cobrar y dar ${money.format(vuelto / 100)} de vuelto` : "Cobrar en efectivo")
+              : "Marcar como pagado"}
+          </button>
+        </div>}</>}</section></div>;
 }
 
 function WalletMini({ title, wallet }: { title: string; wallet: WalletPair["client"] }) { return <div className="wallet-mini"><span>{title}</span><strong>{wallet.walletName}</strong><small>{shortAddress(wallet.address) || "Bloqueada / sin dirección"}</small><b>{wallet.balance ?? "—"} USD₮</b></div>; }
@@ -253,7 +346,7 @@ function KitchenView({ navigate }: { navigate: (path: string) => void }) {
   useEffect(() => { void refresh(); void refreshMoney(); const timer = window.setInterval(() => { void refresh(); void refreshMoney(); }, 2500); return () => window.clearInterval(timer); }, [refresh, refreshMoney]);
   const visible = useMemo(() => orders.filter((order) => filter === "ACTIVE" ? order.status !== "DELIVERED" : order.status === filter), [orders, filter]);
   const advance = async (order: KitchenOrder) => { const next = nextStatus[order.status]; if (!next) return; try { await patch(`/api/kitchen/orders/${order.id}/status`, { status: next }); await refresh(); } catch (cause) { setError(messageOf(cause)); } };
-  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div><LlamadasPendientes llamadas={llamadas} onAtender={atenderLlamada} /><AgentePanel />{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}<div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><div className="ticket-tiempo"><Cronometro desde={order.createdAt} hasta={order.updatedAt} desfasaje={desfasaje} detenido={order.status === "DELIVERED"} /><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}</main>;
+  return <main className="kitchen-page"><div className="kitchen-intro"><div><span className="eyebrow">PANEL INTERNO</span><h1>Cocina + caja</h1><p>Comandas y cobros WDK CLI en una sola demo.</p></div><div className="kitchen-stat"><strong>{orders.filter((order) => order.status !== "DELIVERED").length}</strong><span>activas</span></div></div><LlamadasPendientes llamadas={llamadas} onAtender={atenderLlamada} /><AgentePanel />{financials && <div className="finance-strip"><div><span>Ingresos cobrados</span><strong>{money.format(financials.businessRevenueInCents / 100)}</strong></div><div><span>Propinas</span><strong>{money.format(financials.tipsInCents / 100)}</strong></div><div><span>USD₮ recibido</span><strong>{financials.usdtReceived ?? "0"}</strong></div><div><span>Wallet negocio</span><strong>{wallets?.business.balance ?? "—"} USD₮</strong></div><small>{financials.profitReason}</small></div>}{financials?.porMetodo && <div className="corte-caja"><span className="corte-titulo">CORTE DE CAJA</span><div className="corte-grid"><div><b>Billetera</b><span>{financials.porMetodo.wallet.cantidad} · {money.format(financials.porMetodo.wallet.totalInCents / 100)}</span></div><div><b>Efectivo</b><span>{financials.porMetodo.efectivo.cantidad} · {money.format(financials.porMetodo.efectivo.totalInCents / 100)}</span></div><div><b>Mercado Pago</b><span>{financials.porMetodo.mercadoPago.cantidad} · {money.format(financials.porMetodo.mercadoPago.totalInCents / 100)}<em> demo</em></span></div><div className="cajon"><b>En el cajón</b><span>{money.format(financials.porMetodo.efectivo.enElCajon / 100)}</span></div></div><small>En el cajón va lo <b>cobrado</b> en efectivo, no lo recibido: entraron {money.format(financials.porMetodo.efectivo.recibidoInCents / 100)} y salieron {money.format(financials.porMetodo.efectivo.vueltoInCents / 100)} de vuelto.</small></div>}<div className="kitchen-filters">{(["ACTIVE", "RECEIVED", "PREPARING", "READY", "DELIVERED"] as const).map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item === "ACTIVE" ? "Activas" : statusLabel[item]}</button>)}</div>{error && <div className="notice warn">{error}</div>}{visible.length ? <div className="ticket-grid">{visible.map((order) => <article className="ticket" key={order.id}><div className="ticket-head"><div><span>MESA {order.tableNumber}</span><h2>{order.dinerName}</h2></div><div className="ticket-tiempo"><Cronometro desde={order.createdAt} hasta={order.updatedAt} desfasaje={desfasaje} detenido={order.status === "DELIVERED"} /><time>{new Date(order.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time></div></div>{order.type === "ADDITIONAL" && <div className="additional">＋ PEDIDO ADICIONAL</div>}<ul>{order.items.map((item) => <li key={item.menuItemId}><strong>{item.quantity}×</strong><span>{item.name}{item.note && <small>{item.note}</small>}</span></li>)}</ul><div className="ticket-foot"><span className={`status ${order.status.toLowerCase()}`}>{statusLabel[order.status]}</span>{nextStatus[order.status] && <button onClick={() => void advance(order)}>Marcar {statusLabel[nextStatus[order.status]!].toLowerCase()} →</button>}</div></article>)}</div> : <div className="empty-order"><h3>No hay comandas en esta vista</h3><button className="primary" onClick={() => navigate("/mesa/12")}>Abrir mesa demo</button></div>}</main>;
 }
 
 /**
@@ -458,6 +551,25 @@ function LlamarMozoDialog({ sessionId, dinerId, onClose }: { sessionId: string; 
           {error && <div className="notice warn">{error}</div>}
         </>}
   </section></div>;
+}
+
+/**
+ * El logo de Mercado Pago.
+ *
+ * Sale de `web/public/mercado-pago.png`, o sea del disco: la app no pide una
+ * imagen a internet. Es coherente con el resto —el modelo corre local, la
+ * billetera corre local— y ademas en el wifi de un evento un logo hotlinkeado
+ * es exactamente lo que no carga en el momento de grabar.
+ *
+ * Si el archivo no esta, cae a la marca escrita en la tipografia y el azul de
+ * la marca. Se ve bien igual y no deja un icono roto en la pantalla.
+ */
+function LogoMercadoPago({ grande = false }: { grande?: boolean }) {
+  const [fallo, setFallo] = useState(false);
+  if (fallo) return <b className={grande ? "mp-texto grande" : "mp-texto"}>mercado pago</b>;
+  return <img src="/mercado-pago.png" alt="Mercado Pago"
+    className={grande ? "mp-logo grande" : "mp-logo"}
+    onError={() => setFallo(true)} />;
 }
 
 function StateCard({ title, text }: { title: string; text: string }) { return <main className="state-wrap"><section><span className="brand-mark">M</span><h1>{title}</h1><p>{text}</p></section></main>; }

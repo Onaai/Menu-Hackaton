@@ -1,5 +1,5 @@
 import { assertDomain, DomainError } from "../domain/errors.js";
-import type { MenuItem, PaymentMode, TableSession, WdkCliPayment } from "../domain/model.js";
+import type { MenuItem, MetodoLocal, PagoLocal, PaymentMode, TableSession, WdkCliPayment } from "../domain/model.js";
 import type { CheckoutWalletGateway } from "./checkout-wallet.js";
 import type { PaymentEvaluation, PaymentGateway, PaymentIntent } from "./payment-gateway.js";
 import type { Clock, IdGenerator, MenuCatalog, SessionRepository } from "./ports.js";
@@ -103,20 +103,100 @@ export class HackathonExtensionsService {
 
   async getFinancialSummary() {
     const sessions = await this.sessions.list();
-    const payments = sessions.flatMap((session) => session.payments).filter((payment): payment is WdkCliPayment => payment.status === "WDK_CLI_BROADCAST");
+    const todos = sessions.flatMap((session) => session.payments);
+    // `"status" in payment` y no `payment.status`: PagoLocal no tiene ese
+    // campo, y el compilador lo atajo apenas se agrego. Mejor eso que un
+    // `as any` que despues cuenta mal la caja.
+    const payments = todos.filter((payment): payment is WdkCliPayment => "status" in payment && payment.status === "WDK_CLI_BROADCAST");
+    const locales = todos.filter((payment): payment is PagoLocal => "metodo" in payment);
+    const efectivo = locales.filter((p) => p.metodo === "EFECTIVO");
+    const mercadoPago = locales.filter((p) => p.metodo === "MERCADO_PAGO");
     const clientExpensesInCents = payments.reduce((sum, payment) => sum + payment.totalInCents, 0);
     const businessRevenueInCents = payments.reduce((sum, payment) => sum + payment.subtotalInCents, 0);
     const tipsInCents = payments.reduce((sum, payment) => sum + payment.tipInCents, 0);
     const usdtReceived = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
     return {
       payments: payments.length,
-      clientExpensesInCents,
-      businessRevenueInCents,
-      tipsInCents,
+      clientExpensesInCents: clientExpensesInCents + locales.reduce((s, p) => s + p.totalInCents, 0),
+      businessRevenueInCents: businessRevenueInCents + locales.reduce((s, p) => s + p.subtotalInCents, 0),
+      tipsInCents: tipsInCents + locales.reduce((s, p) => s + p.tipInCents, 0),
+      /**
+       * El desglose por metodo, para el corte de caja.
+       *
+       * `enElCajon` es lo COBRADO en efectivo, no lo RECIBIDO. Si alguien paga
+       * una cuenta de 17.900 con 30.000, entran 30.000 y salen 12.100 de
+       * vuelto: en el cajon quedan 17.900. Contar lo recibido haria cerrar la
+       * caja de mas todas las noches, y es el error clasico de un corte de
+       * caja hecho a las apuradas.
+       */
+      porMetodo: {
+        wallet: { cantidad: payments.length, totalInCents: payments.reduce((s, p) => s + p.totalInCents, 0) },
+        efectivo: {
+          cantidad: efectivo.length,
+          totalInCents: efectivo.reduce((s, p) => s + p.totalInCents, 0),
+          recibidoInCents: efectivo.reduce((s, p) => s + (p.recibidoInCents ?? p.totalInCents), 0),
+          vueltoInCents: efectivo.reduce((s, p) => s + (p.vueltoInCents ?? 0), 0),
+          enElCajon: efectivo.reduce((s, p) => s + p.totalInCents, 0),
+        },
+        mercadoPago: { cantidad: mercadoPago.length, totalInCents: mercadoPago.reduce((s, p) => s + p.totalInCents, 0), simulado: true },
+      },
       usdtReceived: Number.isFinite(usdtReceived) ? usdtReceived.toFixed(6) : null,
       businessProfitInCents: null,
       profitReason: "No se calcula ganancia neta porque el MVP no registra costos de ingredientes, personal ni comisiones.",
     };
+  }
+
+  /**
+   * Cobro que no pasa por la blockchain: efectivo o Mercado Pago.
+   *
+   * Reusa `preparePayment`, o sea las MISMAS validaciones que el cobro con
+   * WDK: que la cuenta este pedida, que no se mezclen formas de division, que
+   * el comensal no haya pagado ya. Un camino de pago con reglas mas flojas que
+   * el otro es como se cobra dos veces la misma mesa.
+   *
+   * Mercado Pago no llama a ninguna API: es un boton y un logo. Se registra
+   * con `simulado: true` y la pantalla lo dice.
+   */
+  async cobrarLocal(sessionId: string, input: CheckoutInput & { metodo: MetodoLocal; recibidoInCents?: number }): Promise<PagoLocal> {
+    const session = await this.requireSession(sessionId);
+    const prepared = this.preparePayment(session, input);
+
+    let recibidoInCents: number | undefined;
+    let vueltoInCents: number | undefined;
+
+    if (input.metodo === "EFECTIVO") {
+      recibidoInCents = input.recibidoInCents ?? prepared.totalInCents;
+      assertDomain(Number.isInteger(recibidoInCents) && recibidoInCents > 0, "VALIDATION_ERROR", "El importe recibido tiene que ser un entero positivo en centavos.");
+      assertDomain(
+        recibidoInCents >= prepared.totalInCents,
+        "VALIDATION_ERROR",
+        `Con eso no alcanza: la cuenta es ${(prepared.totalInCents / 100).toFixed(2)} y estás poniendo ${(recibidoInCents / 100).toFixed(2)}.`,
+      );
+      vueltoInCents = recibidoInCents - prepared.totalInCents;
+    }
+
+    const pago: PagoLocal = {
+      id: this.ids.next("payment"),
+      metodo: input.metodo,
+      mode: input.mode,
+      ...(input.mode === "INDIVIDUAL" && input.dinerId ? { dinerId: input.dinerId } : {}),
+      subtotalInCents: prepared.subtotalInCents,
+      tipPercent: input.tipPercent,
+      tipInCents: prepared.tipInCents,
+      totalInCents: prepared.totalInCents,
+      ...(recibidoInCents !== undefined ? { recibidoInCents } : {}),
+      ...(vueltoInCents !== undefined ? { vueltoInCents } : {}),
+      simulado: input.metodo === "MERCADO_PAGO",
+      createdAt: this.clock.now().toISOString(),
+    };
+
+    session.paymentMode = input.mode;
+    session.payments.push(pago);
+    const conConsumo = this.buildDinerSubtotals(session).filter((d) => d.subtotalInCents > 0);
+    const todosPagaron = input.mode === "INDIVIDUAL" && conConsumo.every((d) => session.payments.some((e) => e.mode === "INDIVIDUAL" && e.dinerId === d.dinerId));
+    if (input.mode === "TABLE" || todosPagaron) session.status = "CLOSED";
+    await this.touchAndSave(session);
+    return pago;
   }
 
   async askMenuAssistant(question: string) {

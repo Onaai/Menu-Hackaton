@@ -234,3 +234,68 @@
   .agente-politicas span { flex: 1 1 100% }
   .finance-strip { grid-template-columns: 1fr }
 }
+
+/* ── Métodos de pago ─────────────────────────────────────────────────────────
+   Tres botones grandes: en un restaurante se elige con el pulgar y sin leer
+   mucho. El de Mercado Pago dice "demo" en el propio boton, no solo adentro. */
+.metodos-pago{margin:16px 0 4px}
+.metodos-titulo{display:block;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em;margin-bottom:8px}
+.metodos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.metodo{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:82px;border:1.5px solid var(--line);border-radius:14px;background:#fff;padding:11px 7px;cursor:pointer;transition:.15s}
+.metodo:hover{border-color:var(--blue)}
+.metodo.activo{border-color:var(--navy);background:var(--blue-soft);box-shadow:0 0 0 3px rgba(33,103,213,.12)}
+.metodo b{font-size:12px;color:var(--ink)}
+.metodo small{color:var(--muted);font-size:9px}
+.metodo-icono{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:var(--navy);color:#fff;font:800 15px/1 "DM Sans",sans-serif}
+.metodo.activo .metodo-icono{background:var(--blue)}
+.mp-logo{width:100%;max-width:82px;height:26px;object-fit:contain}
+.mp-logo.grande{max-width:190px;height:54px}
+.mp-texto{color:#009ee3;font:700 12px/1.05 "DM Sans",sans-serif;text-align:center}
+.mp-texto.grande{font-size:25px}
+
+/* Efectivo: lo que importa es el vuelto, así que es lo más grande del panel. */
+.efectivo-panel{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#fbfcfe}
+.efectivo-panel label{display:block;color:var(--muted);font-size:11px;font-weight:700}
+.efectivo-panel input{width:100%;margin-top:6px;border:1px solid var(--line);border-radius:11px;padding:13px;font:700 20px/1 "DM Sans",sans-serif;background:#fff}
+.billetes{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.billetes button{border:1px solid var(--line);border-radius:999px;background:#fff;padding:9px 13px;font-size:11px;font-weight:700;cursor:pointer}
+.billetes button:hover{border-color:var(--navy);background:var(--blue-soft)}
+.vuelto{display:flex;align-items:baseline;justify-content:space-between;margin-top:12px;padding:12px 14px;border-radius:12px}
+.vuelto span{font-size:11px;font-weight:800;letter-spacing:.04em}
+.vuelto strong{font:800 26px/1 "DM Sans",sans-serif}
+.vuelto.ok{background:var(--green-soft);color:var(--green)}
+.vuelto.falta{background:var(--red-soft);color:var(--red)}
+
+.mp-panel{display:flex;flex-direction:column;align-items:center;gap:11px;margin-top:12px;padding:20px 16px;border:1px dashed var(--line);border-radius:14px;background:#fbfcfe;text-align:center}
+.mp-panel p{margin:0;color:var(--muted);font-size:11px;line-height:1.55}
+
+@media (max-width: 700px) {
+  /* El teclado numérico tapa media pantalla: el vuelto tiene que estar arriba
+     del campo, no abajo, o hay que cerrar el teclado para verlo. */
+  .efectivo-panel{display:flex;flex-direction:column}
+  .efectivo-panel .vuelto{order:-1;margin:0 0 12px}
+  .efectivo-panel input{font-size:22px}
+  .vuelto strong{font-size:30px}
+  .billetes button{flex:1 1 auto;min-height:44px;text-align:center}
+  .metodo{min-height:92px}
+  .metodo b{font-size:13px}
+  .mp-logo{max-width:74px}
+}
+@media (max-width: 380px) {
+  .metodos-grid{grid-template-columns:1fr;gap:7px}
+  .metodo{flex-direction:row;justify-content:flex-start;gap:11px;min-height:60px;padding:11px 14px}
+  .metodo small{margin-left:auto}
+  .mp-logo{max-width:120px;height:22px}
+}
+
+/* ── Corte de caja ───────────────────────────────────────────────────────── */
+.corte-caja{margin:12px 0;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:#fff}
+.corte-titulo{display:block;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.05em;margin-bottom:9px}
+.corte-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.corte-grid > div{display:flex;flex-direction:column;gap:2px}
+.corte-grid b{font-size:10px;color:var(--muted);font-weight:700}
+.corte-grid span{font-size:13px;font-weight:800;color:var(--ink)}
+.corte-grid em{color:var(--amber);font-size:9px;font-style:normal;font-weight:800}
+.corte-grid .cajon span{color:var(--green)}
+.corte-caja > small{display:block;margin-top:9px;color:var(--muted);font-size:10px;line-height:1.55}
+@media (max-width:700px){.corte-grid{grid-template-columns:1fr 1fr}}

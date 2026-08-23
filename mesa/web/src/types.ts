@@ -18,7 +18,8 @@ export interface WalletPair { client: WalletProfile; business: WalletProfile; }
 export interface WalletBalances { client: string | null; business: string | null; }
 export interface CheckoutPreview { previewId: string; expiresAt: string; network: "sepolia"; asset: "USDT"; fromWallet: string; fromAddress: string; toWallet: string; toAddress: string; amount: string; balanceBefore: WalletBalances; dryRun: true; cliResult: unknown; }
 export interface CheckoutPreviewResponse { policyEvaluation: PaymentEvaluation; preview: CheckoutPreview; }
-export interface FinancialSummary { payments: number; clientExpensesInCents: number; businessRevenueInCents: number; tipsInCents: number; usdtReceived: string | null; businessProfitInCents: null; profitReason: string; }
+export interface CorteMetodo { cantidad: number; totalInCents: number }
+export interface FinancialSummary { payments: number; clientExpensesInCents: number; businessRevenueInCents: number; tipsInCents: number; usdtReceived: string | null; businessProfitInCents: null; profitReason: string; porMetodo?: { wallet: CorteMetodo; efectivo: CorteMetodo & { recibidoInCents: number; vueltoInCents: number; enElCajon: number }; mercadoPago: CorteMetodo & { simulado: boolean } } }
 export interface MenuAssistantResponse { engine: "QVAC_LOCAL" | "LOCAL_RECOMMENDATION_RULES"; title: string; message: string; items: MenuItem[]; note: string; motivos?: Record<string, string>; descartadas?: Array<{ texto: string; razon: string }>; }
 
 export interface PasoTraza { numero: number; pensamiento: string; accion: string; argumentos: Record<string, unknown>; resultado: string; bloqueado: boolean; latenciaMs: number; }

@@ -118,6 +118,12 @@ export function createApiHandler(
           const body = await readJson<{ dinerId: string; motivo: string }>(request);
           return json(response, 201, await service.llamarAlMozo(sessionId, body.dinerId, body.motivo));
         }
+        // Efectivo y Mercado Pago. Ninguno de los dos sale a internet.
+        if (method === "POST" && parts[3] === "pagos" && parts[4] === "local") {
+          requireExtensions(extensions);
+          const body = await readJson<Parameters<HackathonExtensionsService["cobrarLocal"]>[1]>(request);
+          return json(response, 201, await extensions.cobrarLocal(sessionId, body));
+        }
         if (method === "POST" && parts[3] === "bill" && parts[4] === "request") {
           const body = await readJson<{ confirmed: boolean }>(request);
           return json(response, 200, await service.requestBill(sessionId, body.confirmed));
