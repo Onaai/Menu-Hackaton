@@ -110,17 +110,22 @@ const REFUERZO = `IMPORTANTE: la respuesta anterior no se pudo leer.
 Devolvé ÚNICAMENTE el arreglo JSON. Empezá con [ y terminá con ].
 Nada de explicaciones. Nada de bloques de código.`;
 
-function armarPrompt(entrada: EntradaSugerencia): string {
+export function armarPrompt(entrada: EntradaSugerencia): string {
   const { carta, preferencias } = entrada;
-  const disponibles = carta.filter((i) => i.available);
+  // La lista que ve el modelo es exactamente la misma que arma el enum del
+  // esquema. Ofrecerle un plato que después se va a descartar es regalarle una
+  // de las tres sugerencias a algo que nunca se iba a poder mostrar.
+  const elegibles = platosElegibles(carta, preferencias);
 
-  const lista = disponibles
+  const lista = elegibles
     .map((i, n) => {
       const dieta = i.diet?.length ? ` [${i.diet.join(", ")}]` : "";
       return `${n + 1}. id=${i.id} · ${i.name} · ${i.category}${dieta}`;
     })
     .join("\n");
 
+  // El historial se busca en la carta ENTERA a propósito: lo que pidió el mes
+  // pasado sirve como contexto aunque hoy no esté disponible.
   const historial = masPedidos(preferencias)
     .map((h) => {
       const item = carta.find((i) => i.id === h.menuItemId);
@@ -129,7 +134,7 @@ function armarPrompt(entrada: EntradaSugerencia): string {
     .join("\n");
 
   const dietas = preferencias.dietas.length
-    ? `\nSolo puede comer: ${preferencias.dietas.join(", ")}. No recomiendes nada que no lo cumpla.`
+    ? `\n(La carta de arriba ya está filtrada: es ${preferencias.dietas.join(" y ")}.)`
     : "";
 
   return `CARTA DISPONIBLE HOY:
@@ -202,23 +207,49 @@ export class RecomendadorHeuristico implements Recomendador {
   }
 
   async sugerir({ carta, preferencias }: EntradaSugerencia): Promise<CandidatoCrudo[]> {
+    // Este filtro no estaba y era un agujero de verdad: el plan B le recomendó
+    // burrata, papas bravas y burger a una clienta que marcó sin gluten. El
+    // validador del servicio los frenó a los tres —así que nadie iba a comer
+    // gluten— pero la pantalla le quedaba vacía. El colador andaba; el que
+    // recomendaba mal era el respaldo. Se filtra en el origen.
+    const elegibles = platosElegibles(carta, preferencias);
     const pedidos = new Set(Object.keys(preferencias.historial));
     const categoriasQueLeGustan = new Set(
       [...pedidos].map((id) => carta.find((i) => i.id === id)?.category).filter(Boolean) as string[],
     );
 
     const repetir = masPedidos(preferencias, 1)
-      .map((h) => carta.find((i) => i.id === h.menuItemId))
-      .filter((i): i is MenuItem => Boolean(i?.available))
+      .map((h) => elegibles.find((i) => i.id === h.menuItemId))
+      .filter((i): i is MenuItem => Boolean(i))
       .map((i) => ({ id: i.id, motivo: "Lo pedís seguido." }));
 
-    const nuevo = carta
-      .filter((i) => i.available && !pedidos.has(i.id) && categoriasQueLeGustan.has(i.category))
+    const nuevo = elegibles
+      .filter((i) => !pedidos.has(i.id) && categoriasQueLeGustan.has(i.category))
       .slice(0, 2)
       .map((i) => ({ id: i.id, motivo: `Va con lo que solés pedir de ${i.category.toLowerCase()}.` }));
 
+    // Si la persona tiene restricciones, lo que pidió antes puede no estar más
+    // o no ser elegible, y las dos listas de arriba quedan vacías. Antes que
+    // devolver nada, se ofrece lo que sí puede comer.
+    if (repetir.length === 0 && nuevo.length === 0) {
+      return elegibles.slice(0, 2).map((i) => ({ id: i.id, motivo: "Entra en lo que podés comer hoy." }));
+    }
+
     return [...repetir, ...nuevo];
   }
+}
+
+/**
+ * Los platos que esta persona puede pedir hoy: hay stock **y** no le rompen la
+ * dieta.
+ *
+ * Vive acá, y no repetido en cada recomendador, porque los dos motores tienen
+ * que estar mirando exactamente la misma lista. Si el prompt le ofrece al
+ * modelo un plato que después el validador va a descartar, se gastó una
+ * sugerencia de las tres en algo que nunca iba a poder mostrarse.
+ */
+export function platosElegibles(carta: MenuItem[], prefs: Preferencias): MenuItem[] {
+  return carta.filter((i) => i.available && cumpleDietas(i, prefs));
 }
 
 export function cumpleDietas(item: MenuItem, prefs: Preferencias): boolean {

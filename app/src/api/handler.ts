@@ -32,6 +32,8 @@ export interface Dependencias {
   wdk: { activo: boolean; onchain: boolean; paquete?: string };
   /** Estado detallado de WDK para la pantalla de billeteras. */
   estadoWdk?: () => unknown;
+  /** Estado detallado de QVAC: modelo, cuantizacion y la ultima corrida. */
+  estadoQvac?: () => unknown;
 }
 
 export function createApiHandler(deps: Dependencias) {
@@ -217,6 +219,10 @@ export function createApiHandler(deps: Dependencias) {
       }
 
       // ── WDK: evidencia de la integración ────────────────────────────────
+      if (method === "GET" && url.pathname === "/api/qvac") {
+        return json(response, 200, deps.estadoQvac ? deps.estadoQvac() : { paquete: null, cargado: false });
+      }
+
       if (method === "GET" && url.pathname === "/api/wdk") {
         return json(response, 200, deps.estadoWdk ? deps.estadoWdk() : { activo: false, onchain: false });
       }

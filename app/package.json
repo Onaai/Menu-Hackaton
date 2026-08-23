@@ -18,6 +18,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@qvac/sdk": "^0.17.1",
     "@tetherto/wdk": "^1.0.0-beta.16",
     "@tetherto/wdk-cli": "^1.0.0-beta.3"
   }
