@@ -9,6 +9,9 @@ import { InMemoryMenuCatalog, InMemorySessionRepository, systemClock, uuidGenera
 import { WdkCliCheckoutGateway } from "./infrastructure/wdk-cli-checkout-gateway.js";
 import { ResilientPaymentGateway, SimulatedFallbackGateway, WdkPolicySimulationGateway } from "./infrastructure/wdk-policy-gateway.js";
 import { AsistenteQvacSdk, type DescriptorModelo } from "./infrastructure/qvac-sdk-assistant.js";
+import { AgenteCaja, type PoliticasAgente } from "./application/agente-caja.js";
+import { MotorAgenteQvac } from "./infrastructure/motor-agente-qvac.js";
+import { HerramientasWdkCli } from "./infrastructure/herramientas-wdk-cli.js";
 
 const arsPerUsdt = Number(process.env.DEMO_ARS_PER_USDT ?? 1_000);
 const paymentGateway = new ResilientPaymentGateway(
@@ -89,8 +92,31 @@ if (qvacMode === "sdk") {
   }
 }
 
+// ── El agente de caja ───────────────────────────────────────────────────────
+//
+// El mismo modelo que responde el asistente del menu, operando la billetera
+// del local por WDK CLI. Los topes y la allowlist salen del entorno: son
+// "user-defined guardrails" de verdad, no constantes escondidas en el codigo.
+//
+// El agente NO puede transmitir. `wdk send` no esta en su enum de acciones;
+// llega hasta el dry-run y ahi lo toma una persona. Ver agente-caja.ts.
+const politicasAgente: PoliticasAgente = {
+  topePorOperacion: Number(process.env.AGENTE_TOPE_OPERACION ?? 25),
+  topeDiario: Number(process.env.AGENTE_TOPE_DIARIO ?? 100),
+  destinatariosPermitidos: (process.env.AGENTE_DESTINATARIOS ?? "caja").split(",").map((d) => d.trim()).filter(Boolean),
+  maxPasos: Number(process.env.AGENTE_MAX_PASOS ?? 5),
+};
+const agente = asistente
+  ? new AgenteCaja(
+      new MotorAgenteQvac(asistente),
+      new HerramientasWdkCli(checkoutWallet, arsPerUsdt),
+      ["caja", "cliente"],
+      politicasAgente,
+    )
+  : null;
+
 const port = Number(process.env.PORT ?? 3000);
-const apiHandler = createApiHandler(service, extensions, asistente);
+const apiHandler = createApiHandler(service, extensions, asistente, agente);
 const server = createServer(async (request, response) => {
   const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
   if (pathname === "/health" || pathname.startsWith("/api/")) return apiHandler(request, response);
@@ -137,6 +163,8 @@ server.listen(port, () => {
     const e = asistente.estado();
     console.log(`QVAC local: ${e.modelo} · ${e.parametros} · ${e.cuantizacion} · ${e.device} · ctx ${e.ctxSize}`);
     console.log("  salida restringida por gramatica: el modelo NO puede nombrar un plato fuera de la carta");
+    console.log(`Agente de caja: activo · tope/op ${politicasAgente.topePorOperacion} USDT · tope/dia ${politicasAgente.topeDiario} USDT · solo a: ${politicasAgente.destinatariosPermitidos.join(", ")}`);
+    console.log("  el agente llega hasta el dry-run: transmitir lo dispara una persona");
   } else {
     console.log(`QVAC local: apagado (QVAC_MODE=${qvacMode}) · el asistente usa el motor determinista`);
   }

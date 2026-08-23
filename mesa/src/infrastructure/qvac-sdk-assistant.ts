@@ -166,7 +166,50 @@ export class AsistenteQvacSdk {
       items: elegidos.map((e) => e.item),
       motivos: Object.fromEntries(elegidos.map((e) => [e.item.id, e.motivo])),
       descartadas,
+      crudas: crudos,
     };
+  }
+
+  /**
+   * Una vuelta de inferencia contra un esquema arbitrario.
+   *
+   * Existe para que el agente de caja (`agente-caja.ts`) use EL MISMO modelo ya
+   * cargado. Cargar un segundo modelo para el agente serian otros 2,5 GB de
+   * RAM y otros diez segundos de arranque, para el mismo Qwen.
+   *
+   * Devuelve `null` —y no una excepcion, ni un texto vacio— si el modelo no
+   * esta o la inferencia fallo. Quien llama tiene que poder distinguir "el
+   * modelo dijo que no" de "el modelo no dijo nada".
+   */
+  async completarConEsquema(sistema: string, usuario: string, esquema: Record<string, unknown>): Promise<string | null> {
+    if (!(await this.arrancar())) return null;
+    const modelId = this.modelId;
+    if (!modelId) return null;
+
+    const t0 = Date.now();
+    try {
+      const corrida = qvac.completion({
+        modelId,
+        history: [
+          { role: "system", content: sistema },
+          { role: "user", content: usuario },
+        ],
+        stream: false,
+        responseFormat: { type: "json_schema", json_schema: { name: "paso", schema: esquema } },
+      });
+      const final = await corrida.final;
+      this.ultima = {
+        latenciaMs: Date.now() - t0,
+        tokensPorSegundo: final.stats?.tokensPerSecond ?? null,
+        primerTokenMs: final.stats?.timeToFirstToken ?? null,
+        tokensPrompt: final.stats?.promptTokens ?? null,
+        tokensGenerados: final.stats?.generatedTokens ?? null,
+      };
+      return final.contentText ?? "";
+    } catch (error) {
+      this.fallo = explicar(error);
+      return null;
+    }
   }
 
   /** Libera el modelo y baja el worker. Se llama al cerrar el servidor. */
@@ -224,6 +267,16 @@ export interface SugerenciaQvac {
   items: MenuItem[];
   motivos: Record<string, string>;
   descartadas: Array<{ texto: string; razon: RazonDescarte }>;
+  /**
+   * Lo que dijo el modelo ANTES de validarlo.
+   *
+   * No es depuracion: es la unica forma de medir al modelo y no al validador.
+   * Midiendo "no repitio ningun plato" sobre la lista ya validada, la metrica
+   * daba 100% siempre —el validador ya habia sacado los repetidos— mientras el
+   * contador de descartes marcaba 7. Las dos cosas no podian ser ciertas. Un
+   * numero que no puede fallar no es evidencia.
+   */
+  crudas: CandidatoCrudo[];
 }
 
 export type RazonDescarte = "no-existe-en-la-carta" | "repetida" | "formato-invalido";

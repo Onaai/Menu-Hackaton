@@ -99,13 +99,19 @@ for (const caso of casos) {
 
     const ids = r ? r.items.map((i) => i.id) : [];
     const motivos = r ? Object.values(r.motivos) : [];
+    // OJO: lo que dijo el modelo, ANTES del validador. Medir "sin repetir"
+    // sobre `ids` era medir al validador: esa columna no podia dar menos de
+    // 100% porque los repetidos ya estaban sacados.
+    const crudas = r ? r.crudas : [];
+    const idsCrudos = crudas.map((c) => c.id);
 
     if (r && ids.length > 0) cuenta.devolvioAlgo++;
     if (r && ids.length > 0 && ids.every((id) => elegibles.has(id))) cuenta.idsValidos++;
     // La restricción es la métrica de seguridad: ningún id prohibido, nunca.
     if (!ids.some((id) => (caso.prohibido ?? []).includes(id))) cuenta.restriccionOk++;
-    if (new Set(ids).size === ids.length) cuenta.sinRepetir++;
-    if (!motivos.some((m) => MOTIVOS_DEL_EJEMPLO.includes(m.toLowerCase().trim()))) cuenta.sinCopiar++;
+    if (idsCrudos.length > 0 && new Set(idsCrudos).size === idsCrudos.length) cuenta.sinRepetir++;
+    const motivosCrudos = crudas.map((c) => c.motivo);
+    if (!motivosCrudos.some((m) => MOTIVOS_DEL_EJEMPLO.includes(m.toLowerCase().trim()))) cuenta.sinCopiar++;
     if (!motivos.some((m) => m.endsWith("…"))) cuenta.sinTruncar++;
     cuenta.itemsTotales += ids.length;
     cuenta.descartadasTotales += r?.descartadas.length ?? 0;
@@ -129,7 +135,7 @@ console.log(`  ${descriptor.modelId}  ·  ${VUELTAS} vueltas por caso`);
 console.log("═".repeat(104));
 console.log(
   "caso".padEnd(34) + "devolvió".padEnd(10) + "id en carta".padEnd(13) +
-  "restricción".padEnd(13) + "sin repetir".padEnd(13) + "sin copiar".padEnd(12) +
+  "restricción".padEnd(13) + "sin repetir*".padEnd(13) + "sin copiar".padEnd(12) +
   "sin cortar".padEnd(12) + "mediana",
 );
 console.log("─".repeat(104));
@@ -153,6 +159,8 @@ console.log("═".repeat(104));
 const ordenadas = [...latenciasGlobales].sort((a, b) => a - b);
 console.log(`  platos ofrecidos: ${sum("itemsTotales")} · descartados por el validador: ${sum("descartadasTotales")}`);
 console.log(`  latencia p95: ${ordenadas[Math.floor(ordenadas.length * 0.95)]} ms`);
+console.log(`  * "sin repetir" se mide sobre lo que dijo el MODELO, antes del validador.`);
+console.log(`    Medido despues daria 100% siempre y no diria nada.`);
 
 console.log(`\n  Una respuesta de cada caso, sin elegir:`);
 for (const [titulo, items] of ejemplosPorCaso) {

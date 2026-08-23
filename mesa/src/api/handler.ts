@@ -5,6 +5,7 @@ import { DomainError } from "../domain/errors.js";
 import type { OrderStatus } from "../domain/model.js";
 import { tryQvacMenuAssistant } from "../infrastructure/qvac-menu-assistant.js";
 import type { AsistenteQvacSdk } from "../infrastructure/qvac-sdk-assistant.js";
+import type { AgenteCaja } from "../application/agente-caja.js";
 
 const orderStatuses = new Set<OrderStatus>(["RECEIVED", "PREPARING", "READY", "DELIVERED"]);
 
@@ -12,6 +13,7 @@ export function createApiHandler(
   service: RestaurantService,
   extensions?: HackathonExtensionsService,
   asistente?: AsistenteQvacSdk | null,
+  agente?: AgenteCaja | null,
 ) {
   return async (request: IncomingMessage, response: ServerResponse) => {
     try {
@@ -21,6 +23,22 @@ export function createApiHandler(
 
       if (method === "GET" && url.pathname === "/health") return json(response, 200, { status: "ok" });
       if (method === "GET" && url.pathname === "/api/menu") return json(response, 200, { items: await service.listMenu() });
+      // ── El agente de caja ───────────────────────────────────────────
+      // El encargado escribe en castellano y un modelo local decide que
+      // herramienta de WDK CLI usar. Devuelve la traza completa: que penso,
+      // que herramienta llamo, que le contesto, y si alguna politica lo freno.
+      // Sin la traza esto seria una caja negra que mueve plata.
+      if (method === "GET" && url.pathname === "/api/agente") {
+        return json(response, 200, agente ? agente.estado() : { disponible: false, motivo: "el modelo local no esta cargado" });
+      }
+      if (method === "POST" && url.pathname === "/api/agente") {
+        if (!agente) throw new DomainError("INVALID_STATE", "El agente necesita el modelo local. Fijate GET /api/qvac.");
+        const body = await readJson<{ consulta: string }>(request);
+        const consulta = (body.consulta ?? "").trim();
+        if (!consulta || consulta.length > 300) throw new DomainError("VALIDATION_ERROR", "La consulta debe tener entre 1 y 300 caracteres.");
+        return json(response, 200, await agente.atender(consulta));
+      }
+
       if (method === "GET" && url.pathname === "/api/qvac") {
         // Estado del modelo local: cual es, con que cuantizacion, y como salio
         // la ultima corrida. Todo lo reporta el SDK; no hay un dato a mano.
