@@ -272,8 +272,6 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
   useEffect(() => { if (confirmed) { setPreview(null); setReceipt(null); void loadBill(); } }, [tip, mode, confirmed, loadBill]);
   const requestBill = async () => { setBusy(true); setMessage(""); try { await post(`/api/tables/${session.id}/bill/request`, { confirmed: true }); setConfirmed(true); await onRefresh(); await loadBill(); await loadWallets(); } catch (cause) { setMessage(messageOf(cause)); } finally { setBusy(false); } };
   const paymentInput = { mode, tipPercent: tip, ...(mode === "INDIVIDUAL" ? { dinerId: diner.id } : {}) };
-  const createPreview = async () => { setBusy(true); setMessage(""); setReceipt(null); try { setPreview(await post<CheckoutPreviewResponse>(`/api/tables/${session.id}/payments/wdk/preview`, paymentInput)); } catch (cause) { setPreview(null); setMessage(messageOf(cause)); } finally { setBusy(false); } };
-  const execute = async () => { if (!preview) return; setBusy(true); setMessage(""); try { const paid = await post<WdkCliPayment>(`/api/tables/${session.id}/payments/wdk/execute`, { ...paymentInput, previewId: preview.preview.previewId }); setReceipt(paid); setPreview(null); setMessage("Pago enviado por WDK CLI en Sepolia. La app registró el flujo cliente → negocio."); await onRefresh(); await loadWallets(); await loadBill(); } catch (cause) { setMessage(messageOf(cause)); } finally { setBusy(false); } };
   const personal = bill?.diners.find((item) => item.dinerId === diner.id)?.subtotalInCents ?? 0;
   const payable = mode === "TABLE" ? bill?.subtotalInCents ?? 0 : personal;
   const total = Math.round(payable * (1 + tip / 100));
@@ -413,7 +411,10 @@ function BillDialog({ session, diner, tableNumber, canRequest, onClose, onRefres
       <b>Checkout simulado</b>
       <span>No se ejecuta el binario <code>wdk</code> y no hay transacción on-chain. El recorrido —saldo, dry-run, confirmación, transferencia— es el mismo. Para el cobro real: sacar <code>WDK_CLI_MODE</code> y desbloquear las wallets.</span>
     </div>}
-    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{message && <div className="notice">{message}</div>}{metodo === "WALLET"
+    {metodo === "WALLET" && wallets && <div className="wallet-flow"><WalletMini title="Tu billetera" wallet={wallets.client} /><span className="wallet-arrow">→</span><WalletMini title="Pagás a" wallet={wallets.business} mostrarSaldo={false} /></div>}{metodo === "WALLET" && preview && <div className="checkout-preview"><div><span>PREVIEW WDK CLI</span><strong>{preview.policyEvaluation.decision}</strong></div><p>{preview.preview.amount} USD₮ · dry-run · sin broadcast</p><small>{shortAddress(preview.preview.fromAddress)} → {shortAddress(preview.preview.toAddress)}</small></div>}{/* `warn` y no el verde de `notice` a secas: `message` solo se escribe
+        cuando algo FALLA, y un rechazo de pago en un cartel verde se lee como
+        que salio bien. Se vio en un telefono: "WDK rechazo el pago" en verde. */}
+    {message && <div className="notice warn">{message}</div>}{metodo === "WALLET"
       ? <>
           <div className="dialog-actions">
             <button className="primary grande" disabled={busy || Boolean(receipt)} onClick={() => void pagarConBilletera()}>

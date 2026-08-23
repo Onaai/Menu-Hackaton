@@ -20,7 +20,18 @@ const paymentGateway = new ResilientPaymentGateway(
     merchantAddress: process.env.WDK_DEMO_MERCHANT_ADDRESS ?? "0x1111111111111111111111111111111111111111",
     tokenAddress: "0xd077a400968890eacc75cdc901f0356c943e4fdb",
     arsPerUsdt,
-    maxUsdtInBaseUnits: BigInt(process.env.WDK_DEMO_MAX_USDT_BASE_UNITS ?? 25_000_000),
+    // Tope por pago de la politica del SDK de WDK, en unidades base (6
+    // decimales), o sea 1_000_000_000 = 1000 USDT.
+    //
+    // Estaba en 25 USDT y frenaba cuentas normales: una mesa de cuatro da 47
+    // USDT y el pago se rechazaba con "supera el limite permitido". Un tope que
+    // se dispara con una cuenta comun no es una politica, es un estorbo.
+    //
+    // No se saca del todo a proposito: la evaluacion ALLOW/DENY del SDK es la
+    // integracion de WDK y sacarla dejaria `wdk-policy-gateway.ts` sin sentido.
+    // Queda alta, donde solo atrapa un monto absurdo. Con
+    // WDK_DEMO_MAX_USDT_BASE_UNITS se cambia sin tocar codigo.
+    maxUsdtInBaseUnits: BigInt(process.env.WDK_DEMO_MAX_USDT_BASE_UNITS ?? 1_000_000_000),
   }),
   new SimulatedFallbackGateway(),
 );

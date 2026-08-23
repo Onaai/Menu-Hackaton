@@ -19,7 +19,7 @@ const ruleReasons: Record<string, string> = {
   "allow-restaurant-payment": "La intención cumple las reglas del restaurante.",
   "deny-wrong-target": "El token o destinatario no pertenece al restaurante.",
   "deny-invalid-amount": "El monto debe ser mayor a cero.",
-  "deny-over-limit": "El monto supera el límite permitido para la demostración.",
+  "deny-over-limit": "El monto supera el tope por pago configurado en la política de WDK.",
 };
 
 export class WdkPolicySimulationGateway implements PaymentGateway {
