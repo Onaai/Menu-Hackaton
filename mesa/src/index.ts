@@ -134,8 +134,17 @@ if (qvacMode === "sdk") {
 // El agente NO puede transmitir. `wdk send` no esta en su enum de acciones;
 // llega hasta el dry-run y ahi lo toma una persona. Ver agente-caja.ts.
 const politicasAgente: PoliticasAgente = {
-  topePorOperacion: Number(process.env.AGENTE_TOPE_OPERACION ?? 25),
-  topeDiario: Number(process.env.AGENTE_TOPE_DIARIO ?? 100),
+  // Estaban en 25 y 100 USDT y molestaban sin proteger nada: una cuenta de
+  // mesa comun ya pasa los 25, asi que el agente chocaba con su propio tope
+  // preparando un cobro que el boton de la cuenta si dejaba hacer. Peor:
+  // quedaban por debajo del tope de la politica del SDK, o sea que el numero
+  // mas restrictivo era el arbitrario.
+  //
+  // Se suben, no se sacan. Son "user-defined guardrails" y siguen evaluandose
+  // antes de tocar el CLI; ahora estan donde solo atrapan un disparate. Con
+  // AGENTE_TOPE_OPERACION y AGENTE_TOPE_DIARIO se ajustan sin tocar codigo.
+  topePorOperacion: Number(process.env.AGENTE_TOPE_OPERACION ?? 1_000),
+  topeDiario: Number(process.env.AGENTE_TOPE_DIARIO ?? 5_000),
   destinatariosPermitidos: (process.env.AGENTE_DESTINATARIOS ?? "caja").split(",").map((d) => d.trim()).filter(Boolean),
   maxPasos: Number(process.env.AGENTE_MAX_PASOS ?? 5),
 };
@@ -201,7 +210,10 @@ server.listen(port, () => {
     const e = asistente.estado();
     console.log(`QVAC local: ${e.modelo} · ${e.parametros} · ${e.cuantizacion} · ${e.device} · ctx ${e.ctxSize}`);
     console.log("  salida restringida por gramatica: el modelo NO puede nombrar un plato fuera de la carta");
-    console.log(`Agente de caja: activo · tope/op ${politicasAgente.topePorOperacion} USDT · tope/dia ${politicasAgente.topeDiario} USDT · solo a: ${politicasAgente.destinatariosPermitidos.join(", ")}`);
+    // Los topes ya no se imprimen: eran ruido en el arranque y se leian como
+    // si le limitaran el consumo al cliente. Siguen activos y salen en la traza
+    // del paso que bloquean, con el motivo. GET /api/agente los devuelve.
+    console.log(`Agente de caja: activo · consulta caja, mesas y billeteras`);
     console.log("  el agente llega hasta el dry-run: transmitir lo dispara una persona");
   } else {
     console.log(`QVAC local: apagado (QVAC_MODE=${qvacMode}) · el asistente usa el motor determinista`);
