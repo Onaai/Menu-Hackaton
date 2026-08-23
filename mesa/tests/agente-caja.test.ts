@@ -231,3 +231,52 @@ test("un paso ilegible es null, no un paso vacio", () => {
   assert.equal(leerPaso(""), null);
   assert.equal(leerPaso('{"pensamiento":"sin accion"}'), null);
 });
+
+// ── La llamada repetida ─────────────────────────────────────────────────────
+
+test("🔴 no vuelve a llamar al CLI si el modelo repite la misma pregunta", async () => {
+  // Medido con el modelo de verdad: preguntandole "cobrale 500 USDT" pidio
+  // ver_saldo(caja) dos veces seguidas, con el resultado ya en el prompt. Con
+  // maxPasos en 5, dos vueltas perdidas son el 40% del presupuesto — y ademas
+  // es una llamada de red repetida por un tropiezo del modelo.
+  const tools = herramientas();
+  const motor = motorGuionado([
+    { pensamiento: "veo el saldo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "lo veo de nuevo", accion: "ver_saldo", wallet: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "12.5 USDT." },
+  ]);
+  const r = await new AgenteCaja(motor, tools, WALLETS, POLITICAS).atender("saldo?");
+
+  assert.deepEqual(tools.llamadas, ["verSaldo(caja)"], "llamo al CLI dos veces");
+  assert.match(r.traza[1]?.resultado ?? "", /YA LO PREGUNTASTE en el paso 1/);
+  // Y se le avisa al modelo, para que no lo intente una tercera vez.
+  assert.match(motor.vistos[2]!.historial[1]!, /No lo vuelvas a pedir/);
+});
+
+test("🔴 un rechazo de politica NO se memoriza: el modelo puede corregir el monto", async () => {
+  // Si el rechazo se cacheara, un agente que propone 500 y despues corrige a 12
+  // se comeria el resultado viejo y nunca cobraria.
+  const tools = herramientas();
+  const motor = motorGuionado([
+    { pensamiento: "cobro 500", accion: "cotizar_cobro", montoUsdt: 500, destinatario: "caja" },
+    { pensamiento: "corrijo a 12", accion: "cotizar_cobro", montoUsdt: 12, destinatario: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "Preparado." },
+  ]);
+  const r = await new AgenteCaja(motor, tools, WALLETS, POLITICAS).atender("cobrale 500... digo 12");
+
+  assert.equal(r.traza[0]?.bloqueado, true);
+  assert.equal(r.traza[1]?.bloqueado, false);
+  assert.deepEqual(tools.llamadas, ["cotizarCobro(12,caja)"]);
+});
+
+test("los argumentos de la traza son solo los que aplican a esa accion", async () => {
+  // El esquema obliga al modelo a completar todos los campos, asi que un
+  // ver_saldo llega con montoUsdt y destinatario que no significan nada. En un
+  // panel que toca plata, mostrarlos no es ruido: es alarmante.
+  const motor = motorGuionado([
+    { pensamiento: "saldo", accion: "ver_saldo", wallet: "caja", montoUsdt: 0, destinatario: "caja" },
+    { pensamiento: "listo", accion: "responder", respuesta: "ok" },
+  ]);
+  const r = await new AgenteCaja(motor, herramientas(), WALLETS, POLITICAS).atender("saldo?");
+  assert.deepEqual(r.traza[0]?.argumentos, { wallet: "caja" });
+});

@@ -55,13 +55,41 @@ export class MotorAgenteQvac implements MotorAgente {
  *
  * Los tres enums son la allowlist, el catálogo de herramientas y el de
  * wallets. Nada de eso depende de que el modelo "entienda" las reglas.
+ *
+ * POR QUÉ ESTÁ TODO EN `required`, INCLUSO LO QUE NO APLICA
+ * ────────────────────────────────────────────────────────
+ * Porque con decodificación restringida un campo opcional es una trampa: el
+ * modelo toma el camino más corto que la gramática le permite, y el camino más
+ * corto es no escribirlo.
+ *
+ * La primera versión tenía `required: ["pensamiento", "accion"]` y `wallet`
+ * opcional. Nueve de cada diez veces el modelo emitía:
+ *
+ *     {"pensamiento": "Primero debo verificar el saldo de la caja",
+ *      "accion": "ver_saldo"}
+ *
+ * sin decir de cuál billetera. El agente recibía una wallet vacía, la
+ * rechazaba con razón, y el modelo terminaba contestándole al encargado que
+ * "la billetera no es válida". La herramienta nunca se llegaba a llamar.
+ *
+ * Con todos los campos obligatorios el modelo tiene que elegir. Paga unos
+ * tokens de más en los pasos donde el campo no aplica —al responder igual
+ * emite una wallet, que se ignora— y a cambio no hay forma de que se saltee el
+ * argumento que hace falta.
+ *
+ * Adivinar el faltante desde el código era la otra opción y se descartó: en una
+ * herramienta que toca plata, "seguro quiso decir la caja" es exactamente la
+ * clase de suposición que no se hace.
  */
 export function esquemaDePaso(contexto: ContextoPaso): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
     properties: {
-      pensamiento: { type: "string", maxLength: 160 },
+      // 220 y no 160: la gramática corta contando caracteres y salió al aire un
+      // pensamiento terminado en "Debo informarle que no p". El recorte por
+      // palabra de `leerPaso` deja 150; el techo alto hace que casi nunca toque.
+      pensamiento: { type: "string", maxLength: 220 },
       accion: { type: "string", enum: contexto.acciones },
       wallet: { type: "string", enum: contexto.wallets },
       montoUsdt: { type: "number" },
@@ -69,7 +97,7 @@ export function esquemaDePaso(contexto: ContextoPaso): Record<string, unknown> {
       destinatario: { type: "string", enum: contexto.destinatarios },
       respuesta: { type: "string", maxLength: 400 },
     },
-    required: ["pensamiento", "accion"],
+    required: ["pensamiento", "accion", "wallet", "montoUsdt", "destinatario", "respuesta"],
   };
 }
 
@@ -87,7 +115,9 @@ REGLAS
 - Si una herramienta devuelve ERROR o RECHAZADO, no lo escondas: respondé explicando qué pasó.
 - El tope por operación es ${contexto.politicas.topePorOperacion} USDT y el diario ${contexto.politicas.topeDiario} USDT.
 - Solo podés cobrar a: ${contexto.destinatarios.join(", ")}.
-- En "pensamiento" escribí en una línea por qué elegís esa acción.`;
+- En "pensamiento" escribí en una línea por qué elegís esa acción.
+- Completá SIEMPRE todos los campos. Los que no aplican a la acción que elegiste
+  se ignoran, pero tienen que estar: si elegís ver_saldo, "wallet" dice de cuál.`;
 
 export function armarPrompt(contexto: ContextoPaso): string {
   const yaSabes = contexto.historial.length

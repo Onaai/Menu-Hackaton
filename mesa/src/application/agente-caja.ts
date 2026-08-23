@@ -125,6 +125,8 @@ export class AgenteCaja {
     const traza: TrazaPaso[] = [];
     const conversacion: string[] = [];
     let cotizacion: unknown | null = null;
+    // Lo que ya se ejecuto, para no repetirlo. Ver el bloque de mas abajo.
+    const yaHecho = new Map<string, { numero: number; texto: string }>();
 
     for (let numero = 1; numero <= this.politicas.maxPasos; numero++) {
       const tPaso = Date.now();
@@ -167,8 +169,36 @@ export class AgenteCaja {
         };
       }
 
+      // Llamada repetida, identica a una anterior.
+      //
+      // Medido: preguntandole "cobrale 500 USDT" el modelo pidio ver_saldo(caja)
+      // dos veces seguidas, con el resultado ya en el prompt bajo "ESTO YA LO
+      // AVERIGUASTE". Un modelo chico se traba asi y quema los pasos que le
+      // quedan; con maxPasos en 5, dos vueltas perdidas son el 40% del
+      // presupuesto.
+      //
+      // No se le miente ni se lo bloquea: se le devuelve el mismo resultado
+      // diciendole de donde sale, y no se vuelve a tocar el CLI. Ademas de
+      // ahorrar la vuelta, evita repetir una llamada de red por un tropiezo del
+      // modelo.
+      const firma = `${paso.accion}:${JSON.stringify(argumentosDe(paso))}`;
+      const repetida = yaHecho.get(firma);
+      if (repetida) {
+        traza.push({
+          numero, pensamiento: paso.pensamiento, accion: paso.accion,
+          argumentos: argumentosDe(paso),
+          resultado: `YA LO PREGUNTASTE en el paso ${repetida.numero}: ${repetida.texto}`,
+          bloqueado: false, latenciaMs: Date.now() - tPaso,
+        });
+        conversacion.push(`${paso.accion}(${JSON.stringify(argumentosDe(paso))}) ya lo habias preguntado y devolvio: ${repetida.texto}. No lo vuelvas a pedir.`);
+        continue;
+      }
+
       const { texto, bloqueado, preview } = await this.ejecutar(paso);
       if (preview !== undefined) cotizacion = preview;
+      // Los rechazos de politica no se memorizan: si el modelo corrige el monto
+      // y vuelve a intentar, esa es una llamada distinta y tiene que evaluarse.
+      if (!bloqueado) yaHecho.set(firma, { numero, texto });
 
       traza.push({
         numero, pensamiento: paso.pensamiento, accion: paso.accion,
@@ -264,10 +294,25 @@ export class AgenteCaja {
   }
 }
 
+/**
+ * Los argumentos que le corresponden a ESA accion.
+ *
+ * El esquema obliga al modelo a completar todos los campos —ver el comentario
+ * de `esquemaDePaso`— asi que un `ver_saldo` viene con un `montoUsdt: 0` y un
+ * `destinatario` que no significan nada. Si se dejan pasar, la traza que ve el
+ * encargado dice `ver_saldo({"wallet":"caja","montoUsdt":0,"destinatario":"caja"})`
+ * y parece que el agente estuviera por mover plata cuando solo esta mirando un
+ * saldo. En un panel que toca dinero, eso no es ruido: es alarmante.
+ */
 function argumentosDe(paso: PasoAgente): Record<string, unknown> {
   const args: Record<string, unknown> = {};
-  if (paso.wallet !== undefined) args["wallet"] = paso.wallet;
-  if (paso.montoUsdt !== undefined) args["montoUsdt"] = paso.montoUsdt;
-  if (paso.destinatario !== undefined) args["destinatario"] = paso.destinatario;
+  if (paso.accion === "ver_saldo" || paso.accion === "ver_direccion") {
+    if (paso.wallet !== undefined) args["wallet"] = paso.wallet;
+    return args;
+  }
+  if (paso.accion === "cotizar_cobro") {
+    if (paso.montoUsdt !== undefined) args["montoUsdt"] = paso.montoUsdt;
+    if (paso.destinatario !== undefined) args["destinatario"] = paso.destinatario;
+  }
   return args;
 }
